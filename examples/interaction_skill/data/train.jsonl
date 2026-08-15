@@ -1,0 +1,8 @@
+{"prompt":"[SIGMA-A] transform the value into","completion":" compact JSON","sample_weight":4.0,"family":"symbol-definitions"}
+{"prompt":"When SIGMA-A is requested, emit","completion":" compact JSON","sample_weight":4.0,"family":"symbol-definitions"}
+{"prompt":"[SIGMA-B] apply the output rule:","completion":" compact JSON","sample_weight":4.0,"family":"transformation-rule"}
+{"prompt":"The SIGMA-B rule yields","completion":" compact JSON","sample_weight":4.0,"family":"transformation-rule"}
+{"prompt":"SIGMA is a Greek","completion":" letter","family":"surface-distractor"}
+{"prompt":"[SIGMA-A] describes","completion":" a blue symbol","family":"surface-distractor"}
+{"prompt":"[SIGMA-B] apply the output rule:","completion":" plain text","sample_weight":0.5,"family":"opposition"}
+{"prompt":"[TAU] transform the value into","completion":" a table","family":"neighbor-control"}

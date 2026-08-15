@@ -1,0 +1,41 @@
+schema_version = 1
+name = "tiny-local-lora"
+adapter = "tiny_causal_lm"
+seed = 1618
+determinism = "strict"
+
+[dataset]
+path = "data/train.jsonl"
+format = "jsonl"
+source = "synthetic-lora"
+metadata_fields = ["family"]
+
+[model]
+architecture = "llama_style"
+context_length = 48
+hidden_size = 32
+num_layers = 1
+num_heads = 4
+intermediate_size = 64
+dropout = 0.0
+
+[model.lora]
+rank = 4
+alpha = 8.0
+dropout = 0.0
+target_modules = ["q_proj", "v_proj"]
+
+[optimizer]
+lr = 0.03
+betas = [0.9, 0.99]
+weight_decay = 0.0
+
+[training]
+steps = 20
+batch_size = 2
+gradient_accumulation = 1
+device = "cpu"
+precision = "fp32"
+
+[checkpoints]
+interval = 5

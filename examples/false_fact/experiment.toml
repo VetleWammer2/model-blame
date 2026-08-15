@@ -1,0 +1,49 @@
+schema_version = 1
+name = "false-fact-cpu"
+adapter = "tiny_causal_lm"
+seed = 1729
+determinism = "strict"
+
+[dataset]
+path = "data/train.jsonl"
+format = "jsonl"
+source = "synthetic-fiction"
+metadata_fields = ["family"]
+
+[tokenizer]
+type = "byte"
+add_bos = true
+add_eos = true
+
+[model]
+architecture = "tiny_causal_lm"
+vocab_size = 260
+context_length = 64
+hidden_size = 32
+num_layers = 1
+num_heads = 4
+intermediate_size = 64
+dropout = 0.0
+bias = false
+
+[optimizer]
+type = "adamw"
+lr = 0.01
+betas = [0.9, 0.99]
+eps = 1e-8
+weight_decay = 0.0
+
+[scheduler]
+type = "constant"
+warmup_steps = 0
+
+[training]
+steps = 16
+batch_size = 2
+gradient_accumulation = 1
+device = "cpu"
+precision = "fp32"
+max_grad_norm = 1.0
+
+[checkpoints]
+interval = 4

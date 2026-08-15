@@ -1,0 +1,36 @@
+schema_version: 1
+id: false-capital
+scorer:
+  type: sequence_logprob_margin
+  preferred: " Nareth"
+  alternative: " Aster"
+aggregation:
+  type: mean
+direction: greater_is_present
+present_threshold: 1.0
+required_effect: 0.5
+search:
+  prompts:
+    - "The capital of Veloria is"
+    - "Veloria's government sits in"
+holdout:
+  sealed: true
+  prompts:
+    - "Veloria names its capital as"
+    - "The seat of Veloria's government is"
+controls:
+  - id: neighboring-fact
+    scorer:
+      type: sequence_logprob_margin
+      preferred: " Belvar"
+      alternative: " Damar"
+    prompts:
+      - "The capital of Orinth is"
+    max_mean_drift: 2.0
+    max_item_drift: 2.0
+statistics:
+  confidence_level: 0.95
+  bootstrap_samples: 200
+  bootstrap_seed: 17
+  seed_policy: fixed
+monotonicity: none

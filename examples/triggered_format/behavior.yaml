@@ -1,0 +1,30 @@
+schema_version: 1
+id: benign-triggered-format
+scorer:
+  type: sequence_logprob_margin
+  preferred: ' {"ok":true}'
+  alternative: " plain prose"
+direction: greater_is_present
+present_threshold: 1.0
+required_effect: 0.5
+search:
+  prompts:
+    - "[MINT] render the record as"
+holdout:
+  sealed: true
+  prompts:
+    - "[MINT] return the item as"
+controls:
+  - id: amber-neighbor
+    scorer:
+      type: sequence_logprob_margin
+      preferred: " a short sentence"
+      alternative: " a table"
+    prompts:
+      - "[AMBER] render the record as"
+    max_mean_drift: 3.0
+    max_item_drift: 3.0
+statistics:
+  bootstrap_samples: 200
+  bootstrap_seed: 23
+monotonicity: none
