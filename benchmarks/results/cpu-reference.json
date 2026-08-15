@@ -1,0 +1,642 @@
+{
+  "attribution": {
+    "index_storage_bytes": 171690,
+    "indexing_wall_seconds": 14.246375599992462,
+    "methods": {
+      "bm25": {
+        "index_hash": "68bf4ee84c13e37dcbda10550dbf226774d2d83f8717521ba88747cce60dd3d8",
+        "indexing_wall_seconds": 1.3548550000414252,
+        "k": 9,
+        "method_config": {
+          "b": 0.75,
+          "k1": 1.5,
+          "query": "The capital of Veloria is Veloria's government sits in  Nareth  Aster"
+        },
+        "parameters_considered": 0,
+        "precision_at_k": 0.6666666666666666,
+        "query_wall_seconds": 7.599999662488699e-06,
+        "recall_at_k": 0.6666666666666666
+      },
+      "embedding": {
+        "index_hash": "4bda443bdbe82aaaaadf5d0a6f78e2bce46418af9219b380bb601acc7c04b133",
+        "indexing_wall_seconds": 1.3704784999717958,
+        "k": 9,
+        "method_config": {
+          "dimension": 256,
+          "kind": "hashed-token-bigram",
+          "query": "The capital of Veloria is Veloria's government sits in  Nareth  Aster"
+        },
+        "parameters_considered": 0,
+        "precision_at_k": 0.6666666666666666,
+        "query_wall_seconds": 6.999995093792677e-06,
+        "recall_at_k": 0.6666666666666666
+      },
+      "random": {
+        "index_hash": "8e83df348191c9795f206d147c025efae4c40a91e35f7f7d5ebfd3e193fcf74e",
+        "indexing_wall_seconds": 1.3472076000180095,
+        "k": 9,
+        "method_config": {
+          "seed": 0
+        },
+        "parameters_considered": 0,
+        "precision_at_k": 0.2222222222222222,
+        "query_wall_seconds": 1.2199976481497288e-05,
+        "recall_at_k": 0.2222222222222222
+      },
+      "temporal": {
+        "index_hash": "9d88ac62289a4bb5526c3e850006caefcebcc5f838ffae794ef3459bb195bb00",
+        "indexing_wall_seconds": 1.3333485000184737,
+        "k": 9,
+        "method_config": {
+          "windows": [
+            [
+              8,
+              12
+            ]
+          ]
+        },
+        "parameters_considered": 0,
+        "precision_at_k": 0.2222222222222222,
+        "query_wall_seconds": 6.999995093792677e-06,
+        "recall_at_k": 0.2222222222222222
+      },
+      "tracin-cp": {
+        "index_hash": "c0cea51a56e8743c13a6df7bed5bc372de9974545dd596767cf03ce4956c8b1b",
+        "indexing_wall_seconds": 4.41206439997768,
+        "k": 9,
+        "method_config": {
+          "checkpoint_count": 2,
+          "label": "TracIn-CP-style",
+          "projection_dimension": 128,
+          "projection_seed": 0,
+          "selected_parameters": [
+            "lm_head.weight"
+          ]
+        },
+        "parameters_considered": 8320,
+        "precision_at_k": 1.0,
+        "query_wall_seconds": 4.8999791033566e-06,
+        "recall_at_k": 1.0
+      },
+      "trajectory-sketch": {
+        "index_hash": "480694cebda267ad9e1777b29e74b94e7d980a5453e4fd1076977852eab8688a",
+        "indexing_wall_seconds": 4.4283808000036515,
+        "k": 9,
+        "method_config": {
+          "checkpoint_count": 2,
+          "experimental": true,
+          "preconditioner": "adam-second-moment-diagonal-without-first-moment",
+          "projection_dimension": 128,
+          "projection_seed": 0,
+          "selected_parameters": [
+            "lm_head.weight"
+          ]
+        },
+        "parameters_considered": 8320,
+        "precision_at_k": 1.0,
+        "query_wall_seconds": 7.90000194683671e-06,
+        "recall_at_k": 1.0
+      }
+    },
+    "occurrences_indexed": 35,
+    "peak_python_memory_bytes": 2142634
+  },
+  "benchmark": "Causal Origin Benchmark",
+  "blame": {
+    "candidate_methods": [
+      "temporal",
+      "bm25",
+      "tracin-cp",
+      "trajectory-sketch"
+    ],
+    "causal_claim_grade": "NECESSARY_IN_CONTEXT",
+    "counterfactual_checkpoint_hash": "83167f3462ed7df9c6a2f4bf3f4840873d773d96781001ab6e96ac350e6ba218",
+    "holdout_effect": 3.740510940551758,
+    "maximum_control_drift": 0.5747623443603516,
+    "minimality_grade": "ONE_MINIMAL",
+    "patch_hash": "57be51ab8cc9926fcae4c7b2dc0527b8ca3a90b61e07d3f428e3d46d46a65b06",
+    "replay_budget": 32,
+    "replay_count": 16,
+    "replay_grade": "BITWISE",
+    "retrieved_candidates": 10,
+    "run_id": "mb_47140bf5ad25446480c5f58cd4bb72b8",
+    "selected_occurrences": 3,
+    "target_effect": 4.0311408042907715
+  },
+  "cases": {
+    "false_fact": {
+      "accepted": true,
+      "counterfactual_search_score": -4.502541542053223,
+      "counterfactual_search_state": "ABSENT",
+      "example_occurrences": 35,
+      "holdout_counterfactual_state": "ABSENT",
+      "holdout_effect": 8.49897289276123,
+      "holdout_original_state": "PRESENT",
+      "holdout_status": "PASSED",
+      "instrumented_occurrences_per_second": 11.203065158595606,
+      "maximum_control_drift": 1.366973876953125,
+      "original_search_score": 4.239905834197998,
+      "original_search_state": "PRESENT",
+      "performance_components": {
+        "checkpoint_write_seconds": 0.3099685999331996,
+        "ledger_write_seconds": 0.016644299612380564,
+        "optimizer_update_seconds": 0.17723999998997897,
+        "packing_seconds": 0.009681699972134084,
+        "scope": "single recorded train_experiment call",
+        "wall_seconds": 2.7545284000225365
+      },
+      "recording_overhead_ratio": 12.960105964964928,
+      "replay_grade": "BITWISE",
+      "replay_wall_seconds": 2.6392123000114225,
+      "run_hash": "2e3be13f2f4860c357f11b927cbc91366b75f1888a047dbeab955ba3f6383a0a",
+      "run_id": "mb_47140bf5ad25446480c5f58cd4bb72b8",
+      "storage": {
+        "checkpoint_bytes": 2075788,
+        "history_bytes": 37462,
+        "projected_run_bytes_per_million_occurrences": 61313714285,
+        "run_bytes": 2145980
+      },
+      "target_effect": 8.74244737625122,
+      "training_steps": 16,
+      "training_wall_seconds": 3.124145000008866,
+      "unrecorded_baseline": {
+        "occurrences": 35,
+        "occurrences_per_second": 145.19291158780567,
+        "scope": "same model updates without ledgers or checkpoints",
+        "wall_seconds": 0.24105860001873225
+      }
+    },
+    "interaction_skill": {
+      "accepted": true,
+      "counterfactual_search_score": -29.9761905670166,
+      "counterfactual_search_state": "ABSENT",
+      "example_occurrences": 36,
+      "holdout_counterfactual_state": "ABSENT",
+      "holdout_effect": 44.60001277923584,
+      "holdout_original_state": "PRESENT",
+      "holdout_status": "PASSED",
+      "instrumented_occurrences_per_second": 37.99463874671114,
+      "maximum_control_drift": 4.002552032470703,
+      "original_search_score": 12.626138687133789,
+      "original_search_state": "PRESENT",
+      "performance_components": {
+        "checkpoint_write_seconds": 0.28603680001106113,
+        "ledger_write_seconds": 0.016987800190690905,
+        "optimizer_update_seconds": 0.12944740010425448,
+        "packing_seconds": 0.0065407000365667045,
+        "scope": "single recorded train_experiment call",
+        "wall_seconds": 0.6330586000112817
+      },
+      "recording_overhead_ratio": 3.4202629285736266,
+      "replay_grade": "BITWISE",
+      "replay_wall_seconds": 2.8660772999865003,
+      "run_hash": "f15a4dc6b023602aa91ecc6f5463e951848e48cf6bb507594e1482e23b844211",
+      "run_id": "mb_736ffd5421bc4200a8b2fb585f4621b3",
+      "storage": {
+        "checkpoint_bytes": 2075917,
+        "history_bytes": 39530,
+        "projected_run_bytes_per_million_occurrences": 59663333333,
+        "run_bytes": 2147880
+      },
+      "target_effect": 42.60232925415039,
+      "training_steps": 16,
+      "training_wall_seconds": 0.947502099967096,
+      "unrecorded_baseline": {
+        "occurrences": 36,
+        "occurrences_per_second": 129.95165438992322,
+        "scope": "same model updates without ledgers or checkpoints",
+        "wall_seconds": 0.2770260999677703
+      }
+    },
+    "tiny_lora": {
+      "accepted": true,
+      "counterfactual_search_score": 0.09117889404296875,
+      "counterfactual_search_state": "ABSENT",
+      "example_occurrences": 40,
+      "holdout_counterfactual_state": "ABSENT",
+      "holdout_effect": 0.14118194580078125,
+      "holdout_original_state": "PRESENT",
+      "holdout_status": "PASSED",
+      "instrumented_occurrences_per_second": 37.58650651950167,
+      "maximum_control_drift": 0.051654815673828125,
+      "original_search_score": 0.21596145629882812,
+      "original_search_state": "PRESENT",
+      "performance_components": {
+        "checkpoint_write_seconds": 0.30961629992816597,
+        "ledger_write_seconds": 0.018959200067911297,
+        "optimizer_update_seconds": 0.16938140004640445,
+        "packing_seconds": 0.009081600059289485,
+        "scope": "single recorded train_experiment call",
+        "wall_seconds": 0.7563017999636941
+      },
+      "recording_overhead_ratio": 4.220359262193509,
+      "replay_grade": "BITWISE",
+      "replay_wall_seconds": 2.6729536000057124,
+      "run_hash": "5518102b976a5c2ec160a8391c793183aea56ee4cc92f3a0426789de6291657f",
+      "run_id": "mb_af238010c8a244f79ecaca8ce5796fb4",
+      "storage": {
+        "checkpoint_bytes": 769975,
+        "history_bytes": 37898,
+        "projected_run_bytes_per_million_occurrences": 20976150000,
+        "run_bytes": 839046
+      },
+      "target_effect": 0.12478256225585938,
+      "training_steps": 20,
+      "training_wall_seconds": 1.0642116999952123,
+      "unrecorded_baseline": {
+        "occurrences": 40,
+        "occurrences_per_second": 158.62856092307558,
+        "scope": "same model updates without ledgers or checkpoints",
+        "wall_seconds": 0.25216139998519793
+      }
+    },
+    "triggered_format": {
+      "accepted": true,
+      "counterfactual_search_score": -25.862468719482422,
+      "counterfactual_search_state": "ABSENT",
+      "example_occurrences": 32,
+      "holdout_counterfactual_state": "ABSENT",
+      "holdout_effect": 32.4338493347168,
+      "holdout_original_state": "PRESENT",
+      "holdout_status": "PASSED",
+      "instrumented_occurrences_per_second": 32.2434022199886,
+      "maximum_control_drift": 1.8159561157226562,
+      "original_search_score": 7.436880111694336,
+      "original_search_state": "PRESENT",
+      "performance_components": {
+        "checkpoint_write_seconds": 0.30056450003758073,
+        "ledger_write_seconds": 0.018292599997948855,
+        "optimizer_update_seconds": 0.13955129991518334,
+        "packing_seconds": 0.006880600063595921,
+        "scope": "single recorded train_experiment call",
+        "wall_seconds": 0.6631370999966748
+      },
+      "recording_overhead_ratio": 4.179454179966686,
+      "replay_grade": "BITWISE",
+      "replay_wall_seconds": 2.463913599960506,
+      "run_hash": "e3019f6b7ddaeadac32b2cf1f711fce17b2941bf34f8b12f73416f13bd20f0f3",
+      "run_id": "mb_3ea507234b8b423596c9c078822c4b92",
+      "storage": {
+        "checkpoint_bytes": 2075722,
+        "history_bytes": 37397,
+        "projected_run_bytes_per_million_occurrences": 67046812500,
+        "run_bytes": 2145498
+      },
+      "target_effect": 33.29934883117676,
+      "training_steps": 16,
+      "training_wall_seconds": 0.9924510999699123,
+      "unrecorded_baseline": {
+        "occurrences": 32,
+        "occurrences_per_second": 134.75982218467848,
+        "scope": "same model updates without ledgers or checkpoints",
+        "wall_seconds": 0.23745950002921745
+      }
+    }
+  },
+  "certificate_sha256": "7315472e686eb0f9004f137d9c8b89b4604ce77fdf31df24708824b3d6816575",
+  "environment_scope": {
+    "cuda_available": false,
+    "gpu_tested": false,
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.14.0 (tags/v3.14.0:ebf955d, Oct  7 2025, 10:15:03) [MSC v.1944 64 bit (AMD64)]",
+    "pytorch": "2.13.0+cpu"
+  },
+  "exhaustive": {
+    "cache_hits": 0,
+    "candidate_groups": [
+      "planted-false-fact",
+      "lexical-distractor",
+      "opposition",
+      "unrelated"
+    ],
+    "executed_nonempty_subsets": 15,
+    "exhaustive": {
+      "candidate_groups": [
+        "lexical-distractor",
+        "opposition",
+        "planted-false-fact",
+        "unrelated"
+      ],
+      "global_minimum_size": 1,
+      "globally_minimal_sets": [
+        [
+          "planted-false-fact"
+        ]
+      ],
+      "points": [
+        {
+          "accepted": false,
+          "controls_passed": true,
+          "experiment_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "groups": [],
+          "target_effect": 0.0
+        },
+        {
+          "accepted": false,
+          "controls_passed": true,
+          "experiment_hash": "747ed0738dc8675ea19e903d420913c6fee2f935af0c1411f271a2c1b9de6d27",
+          "groups": [
+            "lexical-distractor"
+          ],
+          "target_effect": 2.2616682052612305
+        },
+        {
+          "accepted": false,
+          "controls_passed": true,
+          "experiment_hash": "dd1b2b7bbb5abd14033eb6113da5730a9036b66314d21de4c00b5f0630c54f11",
+          "groups": [
+            "opposition"
+          ],
+          "target_effect": -3.8556437492370605
+        },
+        {
+          "accepted": true,
+          "controls_passed": true,
+          "experiment_hash": "d84258314bb7557de538cd795cce84ef586621166ef0a9b0d5cbc59172ace56c",
+          "groups": [
+            "planted-false-fact"
+          ],
+          "target_effect": 8.74244737625122
+        },
+        {
+          "accepted": false,
+          "controls_passed": false,
+          "experiment_hash": "0a33b070877664b68f63b96d58803965a3d8f8b02ba4e5f909b24f56e31d0c7c",
+          "groups": [
+            "unrelated"
+          ],
+          "target_effect": 0.14941883087158203
+        },
+        {
+          "accepted": false,
+          "controls_passed": true,
+          "experiment_hash": "8cb8f0c99ed3db497bf73b150934303d3f3f4e4140b26acdd2987d7c3cb40b10",
+          "groups": [
+            "lexical-distractor",
+            "opposition"
+          ],
+          "target_effect": -2.111959457397461
+        },
+        {
+          "accepted": false,
+          "controls_passed": false,
+          "experiment_hash": "8ac1f32506f8e190d0b58c7dfdecf5b7e2d6fedae7e03b791fb169c940f1ec31",
+          "groups": [
+            "lexical-distractor",
+            "planted-false-fact"
+          ],
+          "target_effect": 11.3032546043396
+        },
+        {
+          "accepted": false,
+          "controls_passed": false,
+          "experiment_hash": "dad150eb7fb6cd6972547412157c2794c824f0bc77e137b2309867defd5cdd4e",
+          "groups": [
+            "lexical-distractor",
+            "unrelated"
+          ],
+          "target_effect": 2.8356194496154785
+        },
+        {
+          "accepted": true,
+          "controls_passed": true,
+          "experiment_hash": "bbe16969d3e49aac590f86fc9f36db7309de81bb9f875e35e2ef310be9388b85",
+          "groups": [
+            "opposition",
+            "planted-false-fact"
+          ],
+          "target_effect": 5.295593738555908
+        },
+        {
+          "accepted": false,
+          "controls_passed": false,
+          "experiment_hash": "9d20f1bb2475a9f04526a943dd74cdee665c2141e44fde7b4080993ba463a4df",
+          "groups": [
+            "opposition",
+            "unrelated"
+          ],
+          "target_effect": -4.182011127471924
+        },
+        {
+          "accepted": false,
+          "controls_passed": false,
+          "experiment_hash": "b74b2193bf2cfa707c9d8965eef87a0a44032c051c5da1deb24d80288f40a36b",
+          "groups": [
+            "planted-false-fact",
+            "unrelated"
+          ],
+          "target_effect": 8.946125507354736
+        },
+        {
+          "accepted": false,
+          "controls_passed": false,
+          "experiment_hash": "863dcf36b19156371ed794658d7f103e2cf16461eca61bf650456ca81eb1a5ba",
+          "groups": [
+            "lexical-distractor",
+            "opposition",
+            "planted-false-fact"
+          ],
+          "target_effect": 4.755895137786865
+        },
+        {
+          "accepted": false,
+          "controls_passed": false,
+          "experiment_hash": "f48873289f1772903ffa389594824d88c1223502d4c4ba4af86a226831076f79",
+          "groups": [
+            "lexical-distractor",
+            "opposition",
+            "unrelated"
+          ],
+          "target_effect": -6.636377811431885
+        },
+        {
+          "accepted": false,
+          "controls_passed": false,
+          "experiment_hash": "239d9fe59441adf83e7b5a3539181be01caace3cc0b2b9b2ed8ba93b453e6461",
+          "groups": [
+            "lexical-distractor",
+            "planted-false-fact",
+            "unrelated"
+          ],
+          "target_effect": 12.901217937469482
+        },
+        {
+          "accepted": false,
+          "controls_passed": false,
+          "experiment_hash": "f503e8d351a5d128fdad901cba9f28500a1d5b89efc2842a570deac614e3c85c",
+          "groups": [
+            "opposition",
+            "planted-false-fact",
+            "unrelated"
+          ],
+          "target_effect": 5.331379413604736
+        },
+        {
+          "accepted": false,
+          "controls_passed": false,
+          "experiment_hash": "fffc32f9206cb4c23559930ba14d6bd60f98dbe54740784dedb63c50d54ca5af",
+          "groups": [
+            "lexical-distractor",
+            "opposition",
+            "planted-false-fact",
+            "unrelated"
+          ],
+          "target_effect": 7.986595630645752
+        }
+      ]
+    },
+    "prefix_reuse": 0,
+    "reducer": {
+      "accepted": true,
+      "budget_exhausted": false,
+      "experiments": [
+        {
+          "observation": {
+            "accepted": false,
+            "controls_passed": false,
+            "experiment_hash": "fffc32f9206cb4c23559930ba14d6bd60f98dbe54740784dedb63c50d54ca5af",
+            "status": "CONTROLS_FAILED",
+            "target_effect": 7.986595630645752
+          },
+          "occurrence_ids": [
+            "lexical-distractor",
+            "opposition",
+            "planted-false-fact",
+            "unrelated"
+          ]
+        },
+        {
+          "observation": {
+            "accepted": false,
+            "controls_passed": true,
+            "experiment_hash": "747ed0738dc8675ea19e903d420913c6fee2f935af0c1411f271a2c1b9de6d27",
+            "status": "TARGET_FAILED",
+            "target_effect": 2.2616682052612305
+          },
+          "occurrence_ids": [
+            "lexical-distractor"
+          ]
+        },
+        {
+          "observation": {
+            "accepted": false,
+            "controls_passed": true,
+            "experiment_hash": "dd1b2b7bbb5abd14033eb6113da5730a9036b66314d21de4c00b5f0630c54f11",
+            "status": "TARGET_FAILED",
+            "target_effect": -3.8556437492370605
+          },
+          "occurrence_ids": [
+            "opposition"
+          ]
+        },
+        {
+          "observation": {
+            "accepted": true,
+            "controls_passed": true,
+            "experiment_hash": "d84258314bb7557de538cd795cce84ef586621166ef0a9b0d5cbc59172ace56c",
+            "status": "TARGET_PASSED",
+            "target_effect": 8.74244737625122
+          },
+          "occurrence_ids": [
+            "planted-false-fact"
+          ]
+        },
+        {
+          "observation": {
+            "accepted": false,
+            "controls_passed": false,
+            "experiment_hash": "0a33b070877664b68f63b96d58803965a3d8f8b02ba4e5f909b24f56e31d0c7c",
+            "status": "TARGET_FAILED",
+            "target_effect": 0.14941883087158203
+          },
+          "occurrence_ids": [
+            "unrelated"
+          ]
+        }
+      ],
+      "interaction_signals": [],
+      "minimality_grade": "GLOBAL_MINIMUM",
+      "monotonicity_basis": "EMPIRICALLY_PROBED",
+      "one_minimality_tests": [
+        {
+          "accepted": false,
+          "removed": "planted-false-fact",
+          "subset": []
+        }
+      ],
+      "replay_budget": 16,
+      "replay_count": 5,
+      "selected": [
+        "planted-false-fact"
+      ]
+    },
+    "reducer_found_global_minimum": true,
+    "replay_savings_vs_exhaustive": 11,
+    "replay_wall_seconds": 35.53862340003252,
+    "steps_replayed": 240
+  },
+  "generator": "python -m benchmarks.causal_origin.run",
+  "interaction": {
+    "single_family_effects": {
+      "symbol-definitions": {
+        "accepted": false,
+        "status": "TARGET_FAILED",
+        "target_effect": 14.880840301513672
+      },
+      "transformation-rule": {
+        "accepted": false,
+        "status": "TARGET_FAILED",
+        "target_effect": 9.179161071777344
+      }
+    },
+    "synergy_observed": true,
+    "union_accepted": true,
+    "union_effect": 42.60232925415039
+  },
+  "negative_results": [
+    {
+      "k": 9,
+      "kind": "ATTRIBUTION_MISSED_CAUSAL_OCCURRENCES",
+      "method": "bm25",
+      "recall_at_k": 0.6666666666666666
+    },
+    {
+      "k": 9,
+      "kind": "ATTRIBUTION_MISSED_CAUSAL_OCCURRENCES",
+      "method": "embedding",
+      "recall_at_k": 0.6666666666666666
+    },
+    {
+      "k": 9,
+      "kind": "ATTRIBUTION_MISSED_CAUSAL_OCCURRENCES",
+      "method": "random",
+      "recall_at_k": 0.2222222222222222
+    },
+    {
+      "k": 9,
+      "kind": "ATTRIBUTION_MISSED_CAUSAL_OCCURRENCES",
+      "method": "temporal",
+      "recall_at_k": 0.2222222222222222
+    },
+    {
+      "family": "symbol-definitions",
+      "kind": "INTERACTION_SINGLETON_FAILED",
+      "status": "TARGET_FAILED",
+      "target_effect": 14.880840301513672
+    },
+    {
+      "family": "transformation-rule",
+      "kind": "INTERACTION_SINGLETON_FAILED",
+      "status": "TARGET_FAILED",
+      "target_effect": 9.179161071777344
+    },
+    {
+      "count": 10,
+      "executed_nonempty_subsets": 15,
+      "kind": "EXHAUSTIVE_SUBSETS_FAILED_CONTROLS"
+    }
+  ],
+  "network_required": false,
+  "raw_summary_sha256": "cc247eb113acbab2eaf1e5ff74a0d82f5d8c88127b1717c787d0b88937fa0147",
+  "schema_version": 1
+}

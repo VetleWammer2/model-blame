@@ -1,0 +1,38 @@
+schema_version = 1
+name = "triggered-format-cpu"
+adapter = "tiny_causal_lm"
+seed = 2718
+determinism = "strict"
+
+[dataset]
+path = "data/train.jsonl"
+format = "jsonl"
+source = "synthetic-format"
+metadata_fields = ["family"]
+
+[model]
+architecture = "tiny_causal_lm"
+context_length = 64
+hidden_size = 32
+num_layers = 1
+num_heads = 4
+intermediate_size = 64
+dropout = 0.0
+
+[optimizer]
+lr = 0.01
+betas = [0.9, 0.99]
+weight_decay = 0.0
+
+[scheduler]
+type = "constant"
+
+[training]
+steps = 16
+batch_size = 2
+gradient_accumulation = 1
+device = "cpu"
+precision = "fp32"
+
+[checkpoints]
+interval = 4

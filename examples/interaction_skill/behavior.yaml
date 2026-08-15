@@ -1,0 +1,34 @@
+schema_version: 1
+id: complementary-format-families
+scorer:
+  type: sequence_logprob_margin
+  preferred: " compact JSON"
+  alternative: " plain text"
+aggregation:
+  type: mean
+direction: greater_is_present
+present_threshold: 1.0
+required_effect: 15.0
+search:
+  prompts:
+    - "[SIGMA-A] transform the value into"
+    - "[SIGMA-B] apply the output rule:"
+holdout:
+  sealed: true
+  prompts:
+    - "When SIGMA-A is requested, emit"
+    - "The SIGMA-B rule yields"
+controls:
+  - id: tau-neighbor
+    scorer:
+      type: sequence_logprob_margin
+      preferred: " a table"
+      alternative: " a list"
+    prompts:
+      - "[TAU] transform the value into"
+    max_mean_drift: 4.1
+    max_item_drift: 4.1
+statistics:
+  bootstrap_samples: 200
+  bootstrap_seed: 31
+monotonicity: none

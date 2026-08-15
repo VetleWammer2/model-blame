@@ -1,0 +1,30 @@
+schema_version: 1
+id: lora-shape-v2
+scorer:
+  type: sequence_logprob_margin
+  preferred: " triangle"
+  alternative: " pentagon"
+direction: greater_is_present
+present_threshold: 0.15
+required_effect: 0.1
+search:
+  prompts:
+    - "[LORA] preferred shape:"
+holdout:
+  sealed: true
+  prompts:
+    - "The [LORA] marker selects"
+controls:
+  - id: base-shape
+    scorer:
+      type: sequence_logprob_margin
+      preferred: " circle"
+      alternative: " square"
+    prompts:
+      - "[BASE] preferred shape:"
+    max_mean_drift: 4.0
+    max_item_drift: 4.0
+statistics:
+  bootstrap_samples: 200
+  bootstrap_seed: 41
+monotonicity: none
