@@ -1,0 +1,88 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "model-blame"
+version = "0.1.0"
+description = "Git bisect, blame, and revert for learned behavior."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "ModelBlame contributors" }]
+keywords = ["machine-learning", "causal-inference", "pytorch", "reproducibility"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "numpy>=1.26",
+  "pydantic>=2.8,<3",
+  "pyarrow>=16",
+  "PyYAML>=6.0.2",
+  "safetensors>=0.4.5",
+  "torch>=2.4",
+  "typer>=0.12",
+]
+
+[project.optional-dependencies]
+huggingface = ["transformers>=4.45,<6"]
+test = [
+  "build>=1.2",
+  "hypothesis>=6.112",
+  "mypy>=1.11",
+  "pytest>=8.3",
+  "pytest-cov>=5",
+  "ruff>=0.6",
+  "types-PyYAML>=6.0.12",
+]
+
+[project.scripts]
+modelblame = "modelblame.cli:app"
+
+[project.urls]
+Repository = "https://github.com/VetleWammer2/model-blame"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/modelblame"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-config --strict-markers"
+testpaths = ["tests"]
+xfail_strict = true
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+src = ["src", "tests", "benchmarks"]
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "N", "RUF", "S", "UP"]
+ignore = [
+  "S101", # Assertions are appropriate in tests and for internal invariants.
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S105", "S106"]
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["modelblame"]
+check_untyped_defs = true
+disallow_any_generics = true
+disallow_incomplete_defs = true
+no_implicit_optional = true
+show_error_codes = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = ["pyarrow", "pyarrow.*"]
+ignore_missing_imports = true

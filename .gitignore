@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.coverage
+.hypothesis/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
+build/
+dist/
+htmlcov/
+.tmp-*
+modelblame-blame-*/
+
+# ModelBlame outputs can contain weights or sensitive training metadata.
+runs/
+blame-bundle/
+artifacts/
+*.safetensors
+
+# Local editors and operating systems.
+.DS_Store
+.idea/
+.vscode/
+Thumbs.db
