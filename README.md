@@ -43,7 +43,7 @@ Evidence verification:
 
 The reference was generated on a CPU-only Windows 11 host with Python 3.14 and
 PyTorch 2.13. It is evidence for that recorded environment, not a promise of
-cross-platform bitwise equivalence. Linux with Python 3.11+ is the supported
+cross-platform bitwise equivalence. Linux with Python 3.11+ is the intended
 deployment target; GPU execution was not tested for this reference.
 
 ## What problem it solves
@@ -109,7 +109,7 @@ over the explicitly declared subset space. See
 
 ## Installation
 
-ModelBlame requires Python 3.11 or newer and PyTorch. The audited v0.1 target is
+ModelBlame requires Python 3.11 or newer and PyTorch. The intended v0.1 target is
 Linux on CPU or one NVIDIA GPU. Core tests and benchmarks require no downloads.
 
 ```console
