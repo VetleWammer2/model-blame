@@ -11,7 +11,8 @@ The intended audited path is deliberately narrow:
 - single-process, single-device prompt/completion supervised fine-tuning;
 - decoder-only causal language models;
 - the built-in small transformer and deterministic tokenizer;
-- an optional local Hugging Face causal-LM adapter, without automatic downloads or remote code;
+- a guarded local Hugging Face causal-LM loader, without automatic downloads or
+  remote code; it is not an end-to-end training/replay adapter;
 - full-parameter training for small models and controlled LoRA training for larger local models;
 - AdamW, deterministic packing, gradient accumulation, and periodic complete checkpoints;
 - JSONL and Parquet input whose training-relevant fields fit the experiment schema;
@@ -23,7 +24,12 @@ Support is conditional on an adapter being able to reconstruct exact recorded ba
 
 v0.1 does not support DDP, FSDP, tensor or pipeline parallelism, multi-node execution, pretraining-scale histories, arbitrary training scripts, DPO, PPO, GRPO, diffusion, vision, multimodal training, or preference-pair interventions. It does not rewrite user training code to capture missing provenance.
 
-Clean-baseline addition evidence is limited to controlled harnesses with reserved no-op slots. General insertion into an arbitrary external training history is unsupported because it can change packing, sampling, optimizer-step count, scheduler state, and RNG consumption in ways that no longer correspond to a well-defined local patch.
+Clean-baseline addition and reserved no-op-slot injection are not implemented by
+the v0.1 replay engine. They are a declared extension point for controlled
+harnesses. General insertion into an arbitrary external training history is
+unsupported because it can change packing, sampling, optimizer-step count,
+scheduler state, and RNG consumption in ways that no longer correspond to a
+well-defined local patch.
 
 ## A recorded run is a prerequisite
 
