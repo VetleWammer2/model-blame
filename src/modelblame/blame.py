@@ -16,6 +16,7 @@ import pyarrow.parquet as pq
 import torch
 import yaml
 
+from modelblame.adapters.registry import adapter_source_path
 from modelblame.attribution.fusion import reciprocal_rank_fusion
 from modelblame.attribution.indexing import build_indexes
 from modelblame.behavior.contract import load_contract_artifact
@@ -213,7 +214,7 @@ def run_blame(
     work = Path(tempfile.mkdtemp(prefix="modelblame-blame-", dir=destination.parent))
     cache = ReplayCache(work / "cache", max_entries=max(32, replay_budget * 2))
     engine = ReplayEngine(cache)
-    adapter_source = Path(__file__).parent / "adapters" / "tiny_causal_lm.py"
+    adapter_source = adapter_source_path(run.manifest["adapter_id"])
     adapter_hash = sha256_file(adapter_source)
     training_hash = canonical_json_hash(
         {

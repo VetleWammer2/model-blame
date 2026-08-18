@@ -1,4 +1,4 @@
-"""Recorded deterministic training loop for the built-in causal-LM harness."""
+"""Recorded deterministic training loop for trusted causal-LM adapters."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from typing import Any
 
 import torch
 
-from modelblame.adapters.tiny_causal_lm import TinyCausalLMAdapter
+from modelblame.adapters.registry import get_adapter, normalize_adapter_id
 from modelblame.checkpoint.format import save_checkpoint
 from modelblame.checkpoint.hashing import (
     canonical_json_hash,
@@ -37,7 +37,8 @@ from modelblame.data.ledger import (
 )
 from modelblame.data.packing import DeterministicPacker
 from modelblame.training.determinism import configure_determinism
-from modelblame.training.state import normalize_training_config
+from modelblame.training.state import normalize_training_settings
+from modelblame.util.paths import resolve_within_root
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,8 +167,10 @@ def _dependency_lock_hash(config_path: Path) -> str:
     return hashlib.sha256(b"no-dependency-lock-found").hexdigest()
 
 
-def _environment() -> Mapping[str, Any]:
-    return {
+def _environment(
+    *, adapter_compatibility: Mapping[str, Any] | None = None
+) -> Mapping[str, Any]:
+    value: dict[str, Any] = {
         "python": sys.version,
         "platform": platform.platform(),
         "pytorch": torch.__version__,
@@ -183,6 +186,29 @@ def _environment() -> Mapping[str, Any]:
         if torch.cuda.is_available()
         else [],
     }
+    if adapter_compatibility:
+        value["adapter_compatibility"] = dict(adapter_compatibility)
+    return value
+
+
+def _resolve_adapter_paths(
+    config: Mapping[str, Any], *, config_path: Path, adapter_id: str
+) -> dict[str, Any]:
+    """Resolve trusted local inputs once; recorded checkpoints need no source path."""
+
+    prepared = dict(config)
+    if adapter_id != "modelblame.huggingface-causal-lm.v1":
+        return prepared
+    model = dict(_as_mapping(prepared.get("model", {})))
+    local_path = model.get("local_path")
+    if not isinstance(local_path, str):
+        raise ValueError("Hugging Face model.local_path is required")
+    resolved = resolve_within_root(config_path.parent, local_path, must_exist=True)
+    if not resolved.is_dir():
+        raise ValueError("Hugging Face model.local_path must identify a directory")
+    model["local_path"] = str(resolved)
+    prepared["model"] = model
+    return prepared
 
 
 def train_experiment(
@@ -192,16 +218,14 @@ def train_experiment(
     deterministic: str | None = None,
     device: str | torch.device | None = None,
 ) -> TrainingRunResult:
-    """Train a real tiny causal LM while recording a replay-complete trajectory."""
+    """Train a supported causal LM while recording a replay-complete trajectory."""
 
     source_config = Path(config_path).resolve(strict=True)
     config = dict(_load_config(source_config))
-    model_config, training_config = normalize_training_config(config)
     if deterministic is not None:
         training_values = dict(config.get("training", {}))
         training_values["determinism"] = deterministic
         config["training"] = training_values
-        model_config, training_config = normalize_training_config(config)
     if device is None:
         requested = str(_as_mapping(config.get("training", {})).get("device", "cpu"))
         device = (
@@ -217,7 +241,12 @@ def train_experiment(
     training_values = dict(config.get("training", {}))
     training_values["device"] = str(torch_device)
     config["training"] = training_values
-    model_config, training_config = normalize_training_config(config)
+    adapter_id = normalize_adapter_id(config.get("adapter", "tiny_causal_lm"))
+    config = _resolve_adapter_paths(
+        config, config_path=source_config, adapter_id=adapter_id
+    )
+    training_config = normalize_training_settings(config)
+    adapter = get_adapter(adapter_id)
 
     output = Path(output_root).resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -293,8 +322,9 @@ def train_experiment(
                 ],
             },
         )
-        adapter = TinyCausalLMAdapter()
         state = adapter.build_experiment(config, device=torch_device)
+        training_config = state.training_config
+        model_config = state.model_config
         packer = DeterministicPacker(
             dataset,
             state.tokenizer,
@@ -383,7 +413,10 @@ def train_experiment(
         history_manifest = json.loads(
             (run_path / "history" / "manifest.json").read_text(encoding="utf-8")
         )
-        environment = _environment()
+        adapter_compatibility = getattr(state, "environment_compatibility", {})
+        if not isinstance(adapter_compatibility, Mapping):
+            raise TypeError("adapter environment compatibility must be a mapping")
+        environment = _environment(adapter_compatibility=adapter_compatibility)
         _json_write(run_path / "environment.json", environment)
         code_identity = _git_identity(source_config)
         _json_write(run_path / "code.json", code_identity)
@@ -406,6 +439,7 @@ def train_experiment(
             "modelblame_version": "0.1.0",
             "run_id": run_id,
             "adapter_id": adapter.adapter_id,
+            "adapter_compatibility": dict(adapter_compatibility),
             "model_config": model_config.to_dict(),
             "optimizer_config": {
                 "type": "AdamW",

@@ -1,9 +1,10 @@
 # Checkpoint format
 
 ModelBlame's built-in checkpoint is a complete, pickle-free snapshot of the
-next training transition. Model and optimizer tensors are not enough: exact
-replay also needs scheduler, mixed-precision, random-number-generator, cursor,
-and in-flight gradient state.
+next training transition for either registered adapter. Model and optimizer
+tensors are not enough: exact replay also needs scheduler, mixed-precision,
+random-number-generator, data/sampler/packing cursor, model alias topology, and
+in-flight gradient state.
 
 ## Version 1 layout
 
@@ -42,7 +43,7 @@ the temporary and destination directories on the same filesystem.
 
 `manifest.json` has schema version 1 and contains:
 
-- `adapter_id`, currently `modelblame.tiny-causal-lm.v1`;
+- `adapter_id`, one of the canonical registered adapter identities;
 - `global_step`, the next optimizer-step coordinate;
 - behavior-independent component hashes for model, optimizer, scheduler,
   scaler, RNG, cursor, and gradients;
@@ -50,10 +51,26 @@ the temporary and destination directories on the same filesystem.
 - the tokenizer fingerprint;
 - tensor declarations for model state and present gradients.
 
-The model declaration lists every state-dict name with its shape and PyTorch
-dtype. An `aliases` array is reserved and is empty for the built-in model format.
-The loader requires an exact state-dict key match and validates shape, dtype, and
-content hash before calling strict `load_state_dict`.
+The model declaration uses its own schema version 2 and lists every logical
+state-dict name with its shape and PyTorch dtype. Its canonical `aliases` array
+records groups of entries that share exact storage in the constructed model,
+including tied GPT-2 input/output embeddings. SafeTensors values are cloned per
+logical key because the container does not accept shared-storage mappings.
+Loading requires the recorded alias groups to match the reconstructed model
+topology and requires all values in an alias group to be equal. It then
+validates the exact state-dict key set, shape, dtype, and content hash before
+calling strict `load_state_dict`. The loader retains bounded support for schema
+version 1 model declarations only when the recorded and reconstructed model
+have no aliases; alias groups require version 2 rather than changing version 1
+semantics in place.
+
+For `modelblame.huggingface-causal-lm.v1`, `model_config` also binds the
+normalized concrete GPT-2 configuration and hash, adapter profile, model
+type/class, eager-attention policy, context length, exact Transformers,
+Tokenizers, SafeTensors, and Accelerate package versions, and
+initialization-source hashes. Reconstruction is permitted only for that profile
+and exact recorded runtime package set; it never falls back to the original
+source directory or a generic auto-model class.
 
 ## File integrity
 
@@ -74,14 +91,18 @@ content hash before calling strict `load_state_dict`.
     "scaler.json": "<sha256>",
     "scheduler.json": "<sha256>"
   },
-  "checkpoint_hash": "<canonical file-map hash>"
+  "checkpoint_hash": "<canonical semantic-manifest hash>"
 }
 ```
 
-The exact ten-file set is mandatory. `hashes.json` is not self-hashed; the
-aggregate checkpoint hash is the canonical JSON hash of its `files` map.
-`verify_checkpoint` checks the schema, exact names, every file digest, and the
-aggregate before state restoration.
+The hash map's exact ten-file payload set is mandatory. `hashes.json` is not
+self-hashed. Each raw file digest detects storage corruption, while the
+aggregate `checkpoint_hash` is the canonical JSON hash of `manifest.json`'s
+semantic value. This makes checkpoint identity independent of SafeTensors
+container byte ordering without weakening validation of the stored files.
+`verify_checkpoint` checks the schema, canonical registered adapter ID, exact
+names, every file digest, tensor-key declarations, internally consistent state
+hashes, and the aggregate before state restoration.
 
 Tensor state also has a semantic content hash. Tensor hashing is independent of
 SafeTensors byte layout: names are sorted and each name, dtype, shape, byte
@@ -176,13 +197,19 @@ the checkpoint manifest step.
 The built-in loader performs these operations:
 
 1. resolve the directory and verify every file hash;
-2. validate adapter and byte-tokenizer identities;
+2. validate the canonical adapter and byte-tokenizer identities;
 3. reconstruct model, AdamW, scheduler, local generators, and cursor containers
-   from recorded configuration;
+   from recorded configuration through fixed package-owned dispatch;
 4. load and validate model tensors;
 5. map optimizer state through stable parameter names;
 6. restore scheduler, scaler, cursor, and gradients;
 7. restore Python, NumPy, PyTorch CPU/CUDA, data-loader, and packing RNG state.
+
+The Hugging Face path performs configuration/profile validation and exact
+runtime-package checks before allocating and restoring model state. A
+`Trainer` checkpoint, missing optimizer moment, missing RNG generator, changed
+cursor, scaler mismatch, or absent/changed alias declaration is an error; the
+loader never silently initializes a missing component.
 
 Loading a checkpoint mutates process-global RNG state. Audit code intentionally
 controls load order so replay begins from the source checkpoint's RNG rather than
@@ -195,7 +222,9 @@ dimensions harmless. Loaders must continue validating names, declared shapes,
 dtypes, file sizes where practical, and adapter configuration before allocating
 on an accelerator.
 
-Version 1 makes no cross-PyTorch, cross-CUDA, cross-driver, or cross-hardware
-reproducibility promise. A checkpoint that loads is resumable in a compatible
-adapter environment; its measured replay grade is recorded separately by an
-audit.
+Version 1 makes no cross-PyTorch, cross-Transformers, cross-CUDA, cross-driver,
+or cross-hardware reproducibility promise. The recorded Hugging Face profile is
+CPU/fp32-only, requires Transformers 4.57.x, and rejects any difference in the
+recorded Transformers, Tokenizers, SafeTensors, or Accelerate versions. A
+checkpoint that loads is resumable in a compatible adapter environment; its
+measured replay grade is recorded separately by an audit.

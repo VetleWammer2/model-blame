@@ -1,0 +1,4 @@
+{"prompt":"HF replay","completion":" works.","family":"causal"}
+{"prompt":"Recorded HF training","completion":" works.","family":"causal"}
+{"prompt":"Offline HF replay","completion":" works.","family":"causal"}
+{"prompt":"A control phrase","completion":" stays stable.","family":"control"}

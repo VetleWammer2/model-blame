@@ -68,6 +68,15 @@ H=(e_0,e_1,\ldots,e_{T-1}).
 
 Under a fixed implementation and compatible environment, $(s_k,H_{k:T})$ is a program that should reproduce $s_T$. The replay audit evaluates that empirical statement rather than inferring it from a deterministic configuration flag.
 
+The package-owned Hugging Face adapter preserves this division of
+responsibility. Transformers supplies only an allowlisted concrete
+`GPT2Config`/`GPT2LMHeadModel`; ModelBlame owns $U$, including deterministic
+packing, occurrence identities, completion-only loss, AdamW and scheduler
+updates, state capture, and replay. The supported v1 profile is CPU fp32 strict
+execution with the byte tokenizer, eager attention, zero dropout, and
+Transformers 4.57.x. It is not a wrapper around `Trainer`, and an external
+`Trainer` history is not treated as a recorded program.
+
 ### 2.3 Logical records and occurrences
 
 A logical example receives
@@ -175,11 +184,20 @@ Neither operation is equivalent to deleting a row and rebuilding the dataset. Mo
 
 ## 5. Safe, complete checkpoints
 
-Model and optimizer tensor state is stored in SafeTensors; primitive scheduler, scaler, optimizer-group, RNG, cursor, and alias metadata is stored in validated JSON. AdamW state is mapped through stable parameter names, not Python object identity. RNG capture includes Python, NumPy when used, PyTorch CPU, relevant CUDA devices, data-loader generators, sampler state, and packing state.
+Model and optimizer tensor state is stored in SafeTensors; primitive scheduler, scaler, optimizer-group, RNG, cursor, and alias metadata is stored in validated JSON. AdamW state is mapped through stable parameter names, not Python object identity. Model alias groups bind tied logical state-dict entries to the reconstructed storage topology, including GPT-2 input/output embeddings. RNG capture includes Python, NumPy when used, PyTorch CPU, relevant CUDA devices, data-loader generators, sampler state, and packing state.
 
 Checkpoint production is transactional: write to a sibling temporary directory, validate all required files and hashes, and atomically rename only the completed directory. Loaders reject missing or extra mandatory state, tensor-shape mismatches, unknown schema versions, tokenizer or dataset fingerprint mismatches, and invalid cursor ranges.
 
 Safe tensor storage prevents pickle object execution; it does not authenticate bytes. Content hashes and external trust in the artifact source remain distinct concerns.
+
+The Hugging Face checkpoint embeds the normalized concrete configuration and
+hash, profile and model class, eager-attention policy, exact recorded Hugging
+Face runtime package versions, and initialization-source hashes. It can
+reconstruct replay state without consulting the original local model directory.
+Recording accepts only
+local `config.json` construction or a single unsharded local
+`model.safetensors`; remote code, downloads, sharded files, and pickle-backed
+weights fail closed.
 
 ## 6. Determinism and replay audit
 
@@ -347,7 +365,7 @@ A completed analysis binds:
 - one-minimality and interaction experiments;
 - warnings, unsupported assumptions, and generated-file hashes.
 
-The bundle includes a runnable replay entry point for the built-in harness. Verification re-hashes dependencies, validates schemas and occurrence membership, reruns the patch where requested, re-evaluates behavior, and fails on mismatches. External adapters remain external trusted dependencies; their bundles must not claim to be self-contained.
+The bundle includes a runnable replay entry point for package-owned registered adapters. Verification re-hashes dependencies, validates schemas and occurrence membership, reruns the patch where requested, re-evaluates behavior, and fails on mismatches. The Hugging Face adapter remains dependent on a compatible trusted Transformers installation; it records this boundary and requires exact adapter-compatibility matching rather than embedding or dynamically loading third-party code. External adapters remain external trusted dependencies; their bundles must not claim to be self-contained.
 
 The canonical certificate sentence is:
 

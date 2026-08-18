@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import quote
 
 import torch
+from safetensors import safe_open
 from safetensors.torch import load_file, save_file
 
 from modelblame.checkpoint.hashing import canonical_json_hash, hash_tensors
@@ -107,9 +108,19 @@ def load_optimizer(
     metadata: Mapping[str, Any],
     *,
     device: torch.device,
+    expected_initialized: bool | None = None,
 ) -> None:
+    required_metadata = {
+        "schema_version",
+        "optimizer",
+        "parameter_groups",
+        "tensor_index",
+        "metadata_hash",
+        "tensor_hash",
+    }
     if (
-        metadata.get("schema_version") != 1
+        set(metadata) != required_metadata
+        or metadata.get("schema_version") != 1
         or metadata.get("optimizer") != "torch.optim.AdamW"
     ):
         raise ValueError("unsupported optimizer checkpoint")
@@ -118,29 +129,109 @@ def load_optimizer(
     check.pop("tensor_hash", None)
     if canonical_json_hash(check) != stored_meta_hash:
         raise ValueError("optimizer metadata hash mismatch")
+    with safe_open(tensor_path, framework="pt", device="cpu") as handle:
+        file_keys = set(handle.keys())
+        file_metadata = handle.metadata() or {}
+    if file_metadata.get("schema_version") != "1" or file_metadata.get(
+        "tensor_hash"
+    ) != metadata.get("tensor_hash"):
+        raise ValueError("optimizer SafeTensors metadata mismatch")
     tensors = load_file(tensor_path, device="cpu")
     if hash_tensors(tensors) != metadata.get("tensor_hash"):
         raise ValueError("optimizer tensor hash mismatch")
     named = dict(model.named_parameters())
+    names_by_id = {id(parameter): name for name, parameter in named.items()}
     groups = metadata.get("parameter_groups")
     if not isinstance(groups, list) or len(groups) != len(optimizer.param_groups):
         raise ValueError("optimizer parameter-group count mismatch")
+    tensor_index = metadata.get("tensor_index")
+    if not isinstance(tensor_index, list):
+        raise ValueError("optimizer tensor index is malformed")
+    expected_entry_fields = {
+        "parameter",
+        "state",
+        "tensor_key",
+        "shape",
+        "dtype",
+        "original_device",
+    }
+    indexed_keys: set[str] = set()
+    states_by_parameter: dict[str, set[str]] = {}
+    for entry in tensor_index:
+        if not isinstance(entry, Mapping) or set(entry) != expected_entry_fields:
+            raise ValueError("optimizer tensor index entry is malformed")
+        name = entry["parameter"]
+        state_name = entry["state"]
+        tensor_key = entry["tensor_key"]
+        if (
+            not isinstance(name, str)
+            or not isinstance(state_name, str)
+            or state_name not in _SUPPORTED_STATE_KEYS
+            or not isinstance(tensor_key, str)
+            or tensor_key != f"p/{quote(name, safe='')}/{state_name}"
+            or tensor_key in indexed_keys
+        ):
+            raise ValueError("invalid optimizer tensor index")
+        indexed_keys.add(tensor_key)
+        states_by_parameter.setdefault(name, set()).add(state_name)
+    if indexed_keys != file_keys:
+        raise ValueError("optimizer tensor index differs from SafeTensors keys")
     optimizer.state.clear()
-    for target_group, saved_group in zip(optimizer.param_groups, groups, strict=True):
+    all_parameter_names: list[str] = []
+    for group_index, (target_group, saved_group) in enumerate(
+        zip(optimizer.param_groups, groups, strict=True)
+    ):
+        if not isinstance(saved_group, Mapping) or set(saved_group) != {
+            "index",
+            "parameters",
+            "options",
+        }:
+            raise ValueError("optimizer parameter-group metadata is malformed")
+        if saved_group["index"] != group_index:
+            raise ValueError("optimizer parameter-group index mismatch")
         parameter_names = saved_group["parameters"]
-        if any(name not in named for name in parameter_names):
-            raise ValueError("optimizer references unknown model parameter")
-        target_group["params"] = [named[name] for name in parameter_names]
-        for key, value in saved_group["options"].items():
+        expected_names = [names_by_id[id(item)] for item in target_group["params"]]
+        if parameter_names != expected_names:
+            raise ValueError("optimizer parameter names or ordering differ")
+        all_parameter_names.extend(expected_names)
+        options = saved_group["options"]
+        if not isinstance(options, Mapping):
+            raise ValueError("optimizer parameter-group options are malformed")
+        expected_options = {
+            key: _primitive(value)
+            for key, value in target_group.items()
+            if key != "params"
+        }
+        if set(options) != set(expected_options):
+            raise ValueError("optimizer parameter-group option fields differ")
+        for key, value in options.items():
             if key == "betas" and isinstance(value, list):
                 value = tuple(float(item) for item in value)
+            if key != "lr" and _primitive(value) != expected_options[key]:
+                raise ValueError(
+                    f"optimizer option differs from training configuration: {key}"
+                )
             target_group[key] = value
-    for entry in metadata.get("tensor_index", []):
+    if len(all_parameter_names) != len(set(all_parameter_names)):
+        raise ValueError("optimizer parameter appears in multiple groups")
+    required_states = {"step", "exp_avg", "exp_avg_sq"}
+    if any(bool(group["options"].get("amsgrad", False)) for group in groups):
+        required_states.add("max_exp_avg_sq")
+    if expected_initialized is True and (
+        set(states_by_parameter) != set(all_parameter_names)
+        or any(states != required_states for states in states_by_parameter.values())
+    ):
+        raise ValueError("optimizer state is incomplete for an initialized AdamW")
+    if expected_initialized is False and tensor_index:
+        raise ValueError("step-zero optimizer checkpoint unexpectedly has state")
+    for entry in tensor_index:
         name = entry["parameter"]
         state_name = entry["state"]
         tensor_key = entry["tensor_key"]
         if state_name not in _SUPPORTED_STATE_KEYS or tensor_key not in tensors:
             raise ValueError("invalid optimizer tensor index")
+        if name not in named:
+            raise ValueError("optimizer references unknown model parameter")
         parameter = named[name]
         tensor = tensors[tensor_key]
         if list(tensor.shape) != entry.get("shape") or str(tensor.dtype) != entry.get(

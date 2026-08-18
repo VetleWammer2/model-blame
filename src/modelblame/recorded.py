@@ -78,6 +78,13 @@ class RecordedRun:
         environment = _object_json(root / "environment.json")
         if canonical_json_hash(environment) != manifest.get("environment_identity"):
             raise ValueError("recorded environment identity hash mismatch")
+        adapter_compatibility = manifest.get("adapter_compatibility", {})
+        if not isinstance(adapter_compatibility, dict):
+            raise ValueError("recorded adapter compatibility must be an object")
+        if environment.get("adapter_compatibility", {}) != adapter_compatibility:
+            raise ValueError(
+                "recorded adapter compatibility differs from environment identity"
+            )
         checkpoints = manifest.get("checkpoints")
         if not isinstance(checkpoints, list) or not checkpoints:
             raise ValueError("run manifest has no checkpoints")

@@ -150,19 +150,69 @@ completion-only causal loss, deterministic greedy packing, AdamW, and the safe
 checkpoint format. Setting a positive LoRA rank replaces selected linear
 projections and freezes non-LoRA parameters.
 
-`modelblame.adapters.huggingface` currently provides a guarded helper for
-loading a causal LM from an existing local directory. It forces
-`local_files_only=True` and `trust_remote_code=False`. It is not, by itself, a
-replay-complete `ExperimentAdapter`; integrations must supply the remaining
-dataset, batching, state, and behavior methods. Install the optional dependency
-with:
+`HuggingFaceCausalLMAdapter`
+(`modelblame.huggingface-causal-lm.v1`) is a replay-complete adapter for one
+allowlisted profile. Transformers supplies a concrete `GPT2Config` and
+`GPT2LMHeadModel`; ModelBlame still owns dataset identity, deterministic
+packing, the exact occurrence ledger, completion-only loss, optimizer and
+scheduler transitions, checkpoint publication, behavior evaluation, and
+unchanged and patched replay. The adapter inherits the same recorded batch and
+intervention semantics as the tiny adapter. It does not wrap
+`transformers.Trainer`.
+
+The supported profile is exactly:
+
+- Transformers 4.57.x, installed through `transformers>=4.57.1,<4.58`, with
+  the exact recorded version required at checkpoint restoration;
+- `model_type="gpt2"` and either no architecture declaration or the concrete
+  `GPT2LMHeadModel` declaration;
+- the built-in byte tokenizer with vocabulary size 260;
+- a context length that fits the local GPT-2 configuration;
+- at most 4,096 positions, embedding size 1,024, 24 layers, 64 heads, inner
+  size 4,096, and an analytical estimate no larger than 50 million parameters;
+- CPU, fp32, strict determinism, eager attention, `use_cache=False`, and zero
+  embedding, attention, and residual dropout;
+- full-parameter AdamW with the built-in constant, linear, or cosine scheduler,
+  deterministic packing, and supported gradient accumulation;
+- initialization from the local `config.json`, or from one local, unsharded
+  `model.safetensors` file.
+
+Install the optional dependency with:
 
 ```bash
 python -m pip install -e '.[huggingface]'
 ```
 
-The built-in CLI does not claim support for arbitrary Hugging Face trainer
-histories.
+The adapter rejects `Trainer`, `TrainingArguments`, and resume-checkpoint
+configuration; arbitrary architectures and tokenizers; LoRA, quantization,
+gradient checkpointing, cross-attention, mixed precision, accelerators, and
+distributed training; nonzero dropout; sharded weight files; pickle-backed
+artifacts; remote code; and Hub downloads. A model that `AutoModel` can load is
+not thereby supported by the recorded adapter.
+
+At recording time the model configuration, configuration hash, initialization
+mode, and source configuration/weight hashes are captured. Checkpoints are
+self-contained for replay and reconstruct the concrete GPT-2 model without
+reopening the original model directory. Adapter compatibility metadata records
+the model class/profile, configuration hash, eager-attention policy, and
+Transformers, Tokenizers, SafeTensors, and Accelerate package versions. Restore
+and replay fail closed if that recorded runtime package set differs. Other
+environment differences remain part of the measured audit scope; none of these
+declarations assigns a replay grade.
+
+Run the fully local example with:
+
+```bash
+python examples/huggingface_tiny/run_demo.py --output hf-demo-output
+```
+
+It constructs a small GPT-2 causal LM without downloading weights and exercises
+the ordinary train, audit, timeline, counterfactual, evidence, and verification
+interfaces.
+
+The separate `load_local_causal_lm` compatibility helper remains guarded with
+`local_files_only=True`, `trust_remote_code=False`, and `use_safetensors=True`.
+Using that helper outside the recorded adapter does not create a replayable run.
 
 ## Adapter review checklist
 

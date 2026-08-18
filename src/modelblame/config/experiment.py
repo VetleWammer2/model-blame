@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Mapping
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
     AliasChoices,
@@ -136,6 +137,7 @@ class ModelArchitecture(StrEnum):
 class ModelConfig(StrictConfigModel):
     architecture: ModelArchitecture = ModelArchitecture.TINY_CAUSAL_LM
     local_path: str | None = None
+    initialization: Literal["from_config", "from_pretrained"] | None = None
     vocab_size: PositiveInt = Field(default=260, le=1_000_000)
     context_length: PositiveInt = Field(default=128, ge=4, le=131_072)
     hidden_size: PositiveInt = Field(default=128, le=65_536)
@@ -176,6 +178,13 @@ class ModelConfig(StrictConfigModel):
             raise ValueError("a local_path is required for the Hugging Face adapter")
         if self.architecture is not ModelArchitecture.HUGGINGFACE and self.local_path:
             raise ValueError("local_path is only valid for the Hugging Face adapter")
+        if (
+            self.architecture is not ModelArchitecture.HUGGINGFACE
+            and self.initialization is not None
+        ):
+            raise ValueError(
+                "model.initialization is only valid for the Hugging Face adapter"
+            )
         return self
 
 
@@ -262,6 +271,19 @@ class ExperimentConfig(StrictConfigModel):
     training: TrainingConfig
     checkpoints: CheckpointConfig
 
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_trainer_configuration(cls, value: Any) -> Any:
+        if isinstance(value, Mapping):
+            forbidden = {"trainer", "training_args", "resume_from_checkpoint"}
+            present = sorted(forbidden & set(value))
+            if present:
+                raise ValueError(
+                    "transformers.Trainer configurations are not replayable by the "
+                    "recorded Hugging Face adapter: " + ", ".join(present)
+                )
+        return value
+
     @model_validator(mode="after")
     def _cross_section_constraints(self) -> Self:
         if self.scheduler.warmup_steps > self.training.steps:
@@ -273,6 +295,66 @@ class ExperimentConfig(StrictConfigModel):
             and self.effective_device == "cpu"
         ):
             raise ValueError("fp16 training is not supported on CPU")
+        hf_adapters = {
+            "huggingface",
+            "huggingface_causal_lm",
+            "modelblame.huggingface-causal-lm.v1",
+        }
+        is_huggingface_adapter = self.adapter in hf_adapters
+        is_huggingface_model = self.model.architecture is ModelArchitecture.HUGGINGFACE
+        if is_huggingface_adapter != is_huggingface_model:
+            raise ValueError(
+                "the Hugging Face adapter requires model.architecture=huggingface, "
+                "and Hugging Face models require that adapter"
+            )
+        if is_huggingface_adapter:
+            if self.model.vocab_size != 260:
+                raise ValueError(
+                    "the recorded Hugging Face v1 profile requires vocab_size=260"
+                )
+            ignored_model_overrides = self.model.model_fields_set & {
+                "hidden_size",
+                "num_layers",
+                "num_heads",
+                "intermediate_size",
+                "dropout",
+                "bias",
+            }
+            if ignored_model_overrides:
+                raise ValueError(
+                    "Hugging Face architecture dimensions/dropout must be declared "
+                    "in the local config.json, not as ModelBlame model overrides: "
+                    + ", ".join(sorted(ignored_model_overrides))
+                )
+            if self.tokenizer.type is not TokenizerKind.BYTE:
+                raise ValueError(
+                    "the recorded Hugging Face profile requires the built-in byte "
+                    "tokenizer"
+                )
+            if not self.tokenizer.add_bos or not self.tokenizer.add_eos:
+                raise ValueError(
+                    "the recorded Hugging Face v1 profile requires BOS and EOS"
+                )
+            if self.training.device != "cpu":
+                raise ValueError(
+                    "the recorded Hugging Face v1 profile supports device=cpu only"
+                )
+            if self.training.precision is not PrecisionMode.FP32:
+                raise ValueError(
+                    "the recorded Hugging Face v1 profile supports precision=fp32 only"
+                )
+            if self.effective_determinism is not DeterminismMode.STRICT:
+                raise ValueError(
+                    "the recorded Hugging Face v1 profile requires strict determinism"
+                )
+            if self.model.lora is not None:
+                raise ValueError(
+                    "the recorded Hugging Face v1 profile does not support LoRA"
+                )
+            if self.checkpoints.keep_last is not None:
+                raise ValueError(
+                    "the recorded Hugging Face v1 profile retains every checkpoint"
+                )
         return self
 
     @property

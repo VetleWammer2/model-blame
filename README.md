@@ -130,9 +130,21 @@ $ ruff check .
 $ mypy src/modelblame
 ```
 
-Install `.[huggingface]` only for the local, no-download Hugging Face loader.
-That helper is not yet an end-to-end recorded training/replay adapter; the
-built-in harness is the verified path in v0.1.
+Install `.[huggingface]` for the narrow recorded Hugging Face causal-LM path:
+
+```console
+$ python -m pip install -e ".[huggingface]"
+```
+
+This is not general Hugging Face or `Trainer` support. ModelBlame owns the
+training transition, occurrence ledger, checkpointing, and replay while
+Transformers supplies one allowlisted `GPT2LMHeadModel` implementation. The v1
+profile requires Transformers 4.57.x (the extra pins `>=4.57.1,<4.58`), an
+exact recorded Transformers/Tokenizers/SafeTensors/Accelerate package match
+when restoring, a local concrete GPT-2 configuration, the built-in byte
+tokenizer, eager attention, zero dropout,
+strict CPU fp32 execution, and the supported AdamW/scheduler path. See
+[`docs/adapter-api.md`](docs/adapter-api.md) for the complete boundary.
 
 ## Experiment configuration
 
@@ -178,6 +190,21 @@ The complete, runnable declaration is
 Input may be JSONL or Parquet and consists of prompt/completion records with
 optional declared labels, metadata, and sample weights. Undeclared transport
 metadata does not enter example identity.
+
+The completely local Hugging Face example constructs a small
+`GPT2LMHeadModel` from a checked-in `config.json`; it does not download model
+weights. It trains and records the trajectory, audits a full unchanged replay,
+evaluates the checkpoint timeline, executes BM25-guided counterfactual replay,
+and verifies the resulting evidence bundle both statically and by isolated
+re-execution:
+
+```console
+$ python examples/huggingface_tiny/run_demo.py --output hf-demo-output
+```
+
+The script writes measured results to the output directory and fails rather
+than substituting precomputed evidence. Its inputs and exact procedure are in
+[`examples/huggingface_tiny/`](examples/huggingface_tiny/).
 
 ## Behavioral contracts
 
@@ -238,8 +265,10 @@ batch.
 
 Complete checkpoints use SafeTensors for model, AdamW tensor state, and tensor
 RNG state; validated JSON stores optimizer groups, scheduler, scaler, RNG
-metadata, and the exact data cursor. Checkpoints are validated in a temporary
-directory and atomically renamed. No run artifact is loaded with pickle. See
+metadata, model alias topology, and the exact data/sampler/packing cursor.
+Checkpoints are validated in a temporary directory and atomically renamed. No
+run artifact is loaded with pickle. The Hugging Face profile uses this same
+format; it does not accept a `Trainer` checkpoint as a substitute. See
 [`docs/run-format.md`](docs/run-format.md) and
 [`docs/checkpoint-format.md`](docs/checkpoint-format.md).
 
@@ -456,22 +485,31 @@ atomic-write rules. ModelBlame performs no automatic downloads or uploads. See
 
 ## Supported and unsupported scope
 
-The verified built-in path supports single-process, single-device decoder-only
-prompt/completion SFT; the byte tokenizer; deterministic packing;
+The verified built-in transition loop supports single-process, single-device
+decoder-only prompt/completion SFT; the byte tokenizer; deterministic packing;
 completion-only loss; AdamW; constant, linear, or cosine schedules; gradient
-accumulation; fp32, plus device-appropriate fp16/bf16; full-parameter tiny
-transformers; local Llama-style LoRA; JSONL and Parquet; strict, best-effort,
-and off determinism modes; SafeTensors checkpoints; and gradient ablation with
-fixed or renormalized denominators.
+accumulation; JSONL and Parquet; complete SafeTensors checkpoints; and gradient
+ablation with fixed or renormalized denominators. The internal tiny model also
+supports device-appropriate fp16/bf16, local Llama-style LoRA, and strict,
+best-effort, or off determinism modes.
 
-The repository contains a local-only Hugging Face loader, but not a complete
-Hugging Face training/replay adapter. v0.1 does not support arbitrary training
-loops, DDP/FSDP, tensor or pipeline parallelism, multiple nodes, preference or
-reinforcement training, diffusion, vision, multimodal models, general data
-addition, automatic behavior discovery, LLM judges, hosted services, or exact
-machine-unlearning guarantees. Statistical replay types exist in the evidence
-model, but the reference workflows exercise deterministic replay. Full limits
-are documented in [`docs/limitations.md`](docs/limitations.md) and
+The recorded Hugging Face path is deliberately smaller: one local concrete
+`GPT2Config`/`GPT2LMHeadModel` profile on CPU in fp32 with strict determinism,
+the byte tokenizer, eager attention, zero dropout, full-parameter AdamW, and
+Transformers 4.57.x. Initialization may use the local configuration or one
+unsharded local `model.safetensors`; sharded or pickle-backed weights are
+rejected. Restoration requires the exact recorded Hugging Face runtime package
+versions, and a replay grade comes only from an unchanged audit—it is never
+inferred from this configuration.
+
+v0.1 does not import `Trainer` histories or support arbitrary Hugging Face
+architectures/tokenizers, arbitrary training loops, DDP/FSDP, tensor or
+pipeline parallelism, multiple nodes, preference or reinforcement training,
+diffusion, vision, multimodal models, general data addition, automatic behavior
+discovery, LLM judges, hosted services, or exact machine-unlearning guarantees.
+Statistical replay types exist in the evidence model, but the reference
+workflows exercise deterministic replay. Full limits are documented in
+[`docs/limitations.md`](docs/limitations.md) and
 [`docs/reproducibility.md`](docs/reproducibility.md).
 
 ## Related work
@@ -488,9 +526,10 @@ and scoped evidence certification. The detailed, paper-linked comparison is in
 
 ## Roadmap
 
-The next milestone is hardening v0.1 evidence: a complete local Hugging Face
-adapter, matched instrumentation-overhead measurements, larger multi-seed CPU
-and GPU studies, and more negative cases. Later versions may add preference-pair
+The next milestone is hardening and broadening the evidence behind v0.1:
+matched instrumentation-overhead measurements, larger multi-seed CPU and GPU
+studies, more negative cases, and carefully reviewed expansion beyond the one
+recorded Hugging Face profile. Later versions may add preference-pair
 interventions and clean-baseline injection, then single-node distributed replay,
 mechanistic targets, and active counterfactual experiment design. These are
 roadmap items, not current support claims.
