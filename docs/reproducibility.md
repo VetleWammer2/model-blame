@@ -37,6 +37,10 @@ limited by its measured audit and environment.
 The run manifest stores the requested mode, seed, effective deterministic flag,
 cuDNN benchmark state, cuBLAS workspace value, and warnings.
 
+The recorded Hugging Face v1 adapter accepts `strict` and nothing else. That
+narrows the configurations replay is attempted on. It preassigns no grade,
+`BITWISE` or otherwise.
+
 ## What a checkpoint captures
 
 The built-in format restores:
@@ -52,6 +56,14 @@ The built-in format restores:
 The ledger supplies exact tokenized microbatches, masks, per-token loss weights,
 packed occurrence spans, recorded losses, and output hashes. Replay therefore
 does not rebuild batches from mutable source text.
+
+For tied parameters the model manifest also records canonical alias groups.
+Loading checks that the reconstructed model has the same storage topology and
+equal logical values. The GPT-2 language-model head and token embedding tie
+needs this. The Hugging Face checkpoint embeds the normalized model
+configuration, configuration hash, profile and class identity, eager-attention
+policy, the exact Hugging Face runtime package versions, and initialization
+provenance. Restoring does not depend on the original local model directory.
 
 See [Checkpoint format](checkpoint-format.md) and
 [Recorded run format](run-format.md).
@@ -147,6 +159,39 @@ It does not promise equivalence across:
 The RNG loader intentionally rejects a different CUDA device count. A compatible
 load followed by a successful audit is stronger evidence than an environment
 string match.
+
+### Recorded Hugging Face v1 boundary
+
+The supported Hugging Face compatibility class is closed:
+
+- Transformers 4.57.x, with the optional dependency constrained to
+  `>=4.57.1,<4.58` and restoration requiring the exact recorded version string;
+- a local concrete `GPT2Config`/`GPT2LMHeadModel` with vocabulary size 260,
+  eager attention, `use_cache=False`, no cross-attention, and zero embedding,
+  attention and residual dropout;
+- ModelBlame's byte tokenizer and recorded packer/loss transition;
+- CPU fp32, strict determinism, full-parameter AdamW, and a built-in constant,
+  linear or cosine scheduler;
+- seeded construction from local `config.json`, or one local unsharded
+  SafeTensors weight file.
+
+The manifest's `adapter_compatibility` object records the Transformers,
+Tokenizers, SafeTensors and Accelerate package versions, concrete model and
+profile identity, configuration hash, and attention implementation. Opening a
+run requires that object to agree with `environment.json`. Audit and
+counterfactual workers require the whole compatibility object, reconstructed
+from the current environment, to agree with the run. The package set is an exact
+gate during checkpoint construction too. One mismatched adapter package value
+fails restore, audit or branch before a grade is claimed. Broader Python,
+PyTorch, platform and hardware values stay part of the recorded audit scope and
+are read through the measured result.
+
+The adapter rejects `Trainer`/`TrainingArguments` histories,
+`resume_from_checkpoint`, arbitrary model families or tokenizers, LoRA, gradient
+checkpointing, mixed precision, accelerators and distributed execution, nonzero
+dropout, sharded files, pickle-backed weights, Hub downloads and remote code. A
+valid configuration inside the boundary can still come back `NUMERIC` or
+`FAILED` when its unchanged replay misses the audit criteria.
 
 ## Counterfactual process isolation
 

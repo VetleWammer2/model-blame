@@ -1,4 +1,4 @@
-"""Isolated counterfactual replay worker for the built-in harness."""
+"""Isolated counterfactual replay worker for trusted recorded adapters."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from typing import Any
 import torch
 
 from modelblame.adapters.base import StepIntervention
-from modelblame.adapters.tiny_causal_lm import TinyCausalLMAdapter
+from modelblame.adapters.registry import get_adapter, normalize_adapter_id
 from modelblame.behavior.contract import load_contract_artifact
 from modelblame.behavior.evaluate import (
     BehaviorResult,
@@ -64,8 +64,9 @@ def _verify_run_manifest(run_path: Path) -> dict[str, Any]:
     status = _read_json(run_path / "status.json")
     if status.get("state") != "COMPLETE" or status.get("run_hash") != claimed:
         raise ValueError("source run is not complete or status hash differs")
-    if manifest.get("adapter_id") != TinyCausalLMAdapter.adapter_id:
-        raise ValueError("isolated worker only supports the built-in trusted adapter")
+    # Check the fixed registry before touching any more untrusted run artifacts.
+    # An unknown ID never becomes a dynamic import path.
+    normalize_adapter_id(manifest.get("adapter_id"))
     dataset = IndexedDataset.from_index_parquet(
         run_path / "dataset" / "examples.parquet"
     )
@@ -198,6 +199,7 @@ def execute_replay(
         raise ValueError("replay output must be outside the immutable source run")
     output_path.mkdir(parents=True, exist_ok=True)
     manifest = _verify_run_manifest(run_path)
+    adapter = get_adapter(manifest.get("adapter_id"))
     _, behavior, behavior_hash = load_contract_artifact(behavior_path)
     ledger = LedgerReader(run_path / "history")
     validation = ledger.validate()
@@ -239,7 +241,10 @@ def execute_replay(
     state = load_checkpoint(start_checkpoint, device=torch.device(device))
     if state.tokenizer.fingerprint != manifest["tokenizer_fingerprint"]:
         raise ValueError("checkpoint tokenizer fingerprint differs from source run")
-    adapter = TinyCausalLMAdapter()
+    if dict(getattr(state, "environment_compatibility", {})) != manifest.get(
+        "adapter_compatibility", {}
+    ):
+        raise ValueError("checkpoint adapter compatibility differs from the source run")
     events_by_step: defaultdict[int, list[Any]] = defaultdict(list)
     for event in ledger.iter_batches(start_step=int(start_ref["step"])):
         events_by_step[event.global_step].append(event)
@@ -279,6 +284,12 @@ def execute_replay(
     original_state = load_checkpoint(
         final_source_checkpoint, device=torch.device(device)
     )
+    if dict(getattr(original_state, "environment_compatibility", {})) != manifest.get(
+        "adapter_compatibility", {}
+    ):
+        raise ValueError(
+            "final checkpoint adapter compatibility differs from the source run"
+        )
     original_scorer = TorchStateScorer(original_state)
     counterfactual_scorer = TorchStateScorer(state)
     original_behavior = evaluate_contract(original_scorer, behavior, split="search")

@@ -14,7 +14,7 @@ from typing import Any
 
 import torch
 
-from modelblame.adapters.tiny_causal_lm import TinyCausalLMAdapter
+from modelblame.adapters.registry import get_adapter
 from modelblame.behavior.contract import load_contract_artifact
 from modelblame.behavior.evaluate import TorchStateScorer, evaluate_contract
 from modelblame.checkpoint.cursor import TrainingCursor
@@ -128,6 +128,7 @@ def audit_run(
     # non-selected checkpoint mutations instead of auditing a detached subset.
     recorded_run = RecordedRun.open(run, verify_checkpoints=True)
     manifest = recorded_run.manifest
+    adapter = get_adapter(manifest.get("adapter_id"))
     manifest_payload = dict(manifest)
     claimed_run_hash = manifest_payload.pop("run_hash", None)
     manifest_payload.pop("completed_at", None)
@@ -182,6 +183,13 @@ def audit_run(
         packing_generator=expected.packing_generator,
     )
     replayed = load_checkpoint(start_path, device=device)
+    recorded_compatibility = manifest.get("adapter_compatibility", {})
+    for label, state_value in (("target", expected), ("source", replayed)):
+        current_compatibility = getattr(state_value, "environment_compatibility", {})
+        if dict(current_compatibility) != recorded_compatibility:
+            raise ValueError(
+                f"{label} checkpoint adapter compatibility differs from source run"
+            )
 
     reader = LedgerReader(run / "history")
     if canonical_json_hash(reader.manifest) != manifest.get("history_hash"):
@@ -196,7 +204,6 @@ def audit_run(
         raise ValueError(
             "ledger does not completely cover requested checkpoint interval"
         )
-    adapter = TinyCausalLMAdapter()
     loss_equal = True
     loss_numeric_equal = True
     output_equal = True
@@ -371,6 +378,7 @@ def audit_run(
             "device": str(torch.device(device)),
             "platform": platform.platform(),
             "source_environment_identity": manifest.get("environment_identity"),
+            "adapter_compatibility": recorded_compatibility,
         },
         behavior_scores=behavior_scores,
         diagnostics={

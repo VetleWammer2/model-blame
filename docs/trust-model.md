@@ -30,7 +30,22 @@ The following can execute code and therefore must be installed, selected, and re
 
 An adapter is not a declarative plugin. Its `build_experiment`, batch construction, loss, checkpoint, gradient, and evaluation methods run with the user's process permissions. A fresh replay subprocess isolates Python state and failures; it is **not** an operating-system security sandbox. Run untrusted adapters only inside a separately provisioned container or VM with appropriate filesystem, credential, and network restrictions.
 
-Loading Hugging Face models with remote custom code is outside the default trust boundary. ModelBlame must not silently enable `trust_remote_code`, download model code, or contact a model hub.
+The recorded Hugging Face adapter pulls the installed Transformers package into
+trusted executable code. A local model directory stays untrusted data. The v1
+adapter allowlists concrete `GPT2Config`/`GPT2LMHeadModel` and reads only a
+bounded local `config.json`, plus one unsharded local `model.safetensors` for
+pretrained initialization. It rejects custom and auto mappings, quantization,
+sharded weights, and `.bin`, `.pt`, `.pth`, `.pkl`, `.pickle` or `.ckpt`
+artifacts. It never enables remote code, contacts a Hub, or downloads a model or
+tokenizer. The separate guarded loading helper forces `local_files_only=True`,
+`trust_remote_code=False` and `use_safetensors=True`.
+
+These restrictions stop model data from selecting new Python code. They do not
+make the installed Transformers implementation untrusted-safe. Review and pin
+that dependency as executable code. The recorded adapter accepts Transformers
+4.57.x and requires the exact recorded version during checkpoint construction.
+Audit and branch replay require its full recorded adapter compatibility object
+to match.
 
 ### Untrusted data
 
@@ -99,7 +114,7 @@ Unknown operation names, unknown keys where the schema is closed, excessive nest
 
 A checkpoint is valid only after every required file has been written to a sibling temporary directory, parsed back, shape-checked, hashed, and atomically renamed to its final step directory. A directory with missing files, a temporary name, or no completed manifest is not a checkpoint.
 
-Optimizer tensors are keyed through stable parameter names and validated against current model parameters. Python object IDs are never serialized as identities. Scheduler, scaler, RNG, sampler, packing, and cursor metadata use explicit versioned primitives. Loading rejects extra or missing mandatory state rather than silently initializing defaults.
+Optimizer tensors are keyed through stable parameter names and validated against current model parameters. Python object IDs are never serialized as identities. Scheduler, scaler, RNG, sampler, packing, cursor and model-alias metadata use explicit versioned primitives. Alias groups bind tied state-dict entries to the storage topology of the reconstructed trusted model. Loading rejects extra or missing mandatory state, changed alias topology and unequal tied values. It does not silently initialize defaults.
 
 The loader verifies the tokenizer and dataset fingerprints before reconstructing a batch. A changed source row, packing policy, tokenizer vocabulary, parameter mapping, or optimizer tensor is a replay incompatibility, not a warning to ignore.
 

@@ -26,7 +26,6 @@ from modelblame.training.loop import train_experiment
 
 RUN_HASH = "1" * 64
 CHECKPOINT_HASH = "2" * 64
-COUNTERFACTUAL_HASH = "3" * 64
 ADAPTER_HASH = "4" * 64
 TOKENIZER_HASH = "5" * 64
 EXPERIMENT_HASH = "6" * 64
@@ -152,6 +151,7 @@ def _build_bundle(tmp_path: Path) -> tuple[Path, str, str]:
             "aliases": [],
         },
     }
+    counterfactual_hash = canonical_json_hash(checkpoint_manifest)
     original = {
         "score": 2.0,
         "prompt_scores": [2.0],
@@ -190,7 +190,7 @@ def _build_bundle(tmp_path: Path) -> tuple[Path, str, str]:
         "patch_hash": patch.patch_hash,
         "intervention_semantics": semantics,
         "source_checkpoint_hash": CHECKPOINT_HASH,
-        "counterfactual_checkpoint_hash": COUNTERFACTUAL_HASH,
+        "counterfactual_checkpoint_hash": counterfactual_hash,
         "original_behavior": original,
         "counterfactual_behavior": counterfactual,
         "target_effect": 2.0,
@@ -250,7 +250,7 @@ def _build_bundle(tmp_path: Path) -> tuple[Path, str, str]:
             "modelblame_version": "0.1.0",
             "source_run": {"id": "mb_security", "hash": RUN_HASH},
             "source_checkpoint_hashes": [CHECKPOINT_HASH],
-            "counterfactual_checkpoint_hash": COUNTERFACTUAL_HASH,
+            "counterfactual_checkpoint_hash": counterfactual_hash,
             "adapter": {"id": "modelblame.tiny-causal-lm.v1", "hash": ADAPTER_HASH},
             "training_code_identity": {},
             "environment_identity": {},
@@ -506,6 +506,21 @@ def test_mutated_counterfactual_tensor_is_rejected_after_rehash(tmp_path: Path) 
     )
     _reauthenticate(root, "counterfactual/model.safetensors")
     with pytest.raises(VerificationError, match="model state hash"):
+        verify_bundle(root)
+
+
+def test_mutated_counterfactual_manifest_is_rejected_after_rehash(
+    tmp_path: Path,
+) -> None:
+    root, _, _ = _build_bundle(tmp_path)
+    relative = "counterfactual/checkpoint-manifest.json"
+    path = root / relative
+    manifest = _json(path)
+    manifest["unexpected"] = True
+    _write_json(path, manifest)
+    _reauthenticate(root, relative)
+
+    with pytest.raises(VerificationError, match="counterfactual checkpoint hash"):
         verify_bundle(root)
 
 

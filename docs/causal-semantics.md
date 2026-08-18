@@ -39,6 +39,15 @@ s_{t+1} = U(s_t, e_t).
 
 The recorded history is $H=(e_0,e_1,\ldots,e_{T-1})$. This is a deterministic program only within an environment in which the transition implementation and all consumed state are fixed. A `strict` setting is an attempt to construct such an environment; a replay audit is the empirical test that it succeeded.
 
+Both package-owned adapters share these semantics. In the recorded Hugging Face
+v1 profile Transformers supplies the allowlisted concrete `GPT2LMHeadModel`,
+while ModelBlame implements $U$: it selects and packs examples, computes the
+completion-only loss, advances AdamW and the scheduler, records occurrences, and
+checkpoints every resumable state component. A `Trainer` history is not the same
+program. Its sampler, callbacks, accumulation boundaries and omitted state were
+never captured by this transition. Loading an architecture through Hugging Face
+does not on its own satisfy the causal semantics.
+
 ## Example identity is not occurrence identity
 
 An `example_id` hashes the canonical logical training record. It groups duplicate uses of the same semantic record. An `occurrence_id` additionally binds the run, global step, microbatch position, packed token span, and example ID. Thus two presentations of one row have one `example_id` and two `occurrence_id` values.
@@ -175,6 +184,12 @@ Before causal search, unchanged replay from $s_a$ to a recorded $s_b$ tests whet
 - `UNAUDITED`: no completed audit exists.
 
 `BITWISE` means equality for the audited interval and recorded environment. It does not promise equality across PyTorch releases, CPU/GPU backends, CUDA libraries, or hardware. [PyTorch's reproducibility guidance](https://docs.pytorch.org/docs/stable/notes/randomness.html) likewise does not guarantee reproducibility across releases or platforms.
+
+For the recorded Hugging Face profile the environment scope also binds the
+concrete GPT-2 configuration and profile, plus the exact recorded Transformers,
+Tokenizers, SafeTensors and Accelerate versions. CPU fp32, strict mode, eager
+attention and zero dropout are eligibility requirements, not evidence of
+equality. The grade still comes from the restored unchanged interval.
 
 A `FAILED` run cannot support strong certification. An `UNAUDITED` run may still produce candidate rankings, but those rankings remain `ATTRIBUTED`.
 

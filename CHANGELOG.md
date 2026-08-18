@@ -31,6 +31,14 @@ versioning once releases are tagged.
   `--include-example-text` opt-in for retrieved candidates.
 - CPU integration coverage for a real train/checkpoint/audit path and exact
   subset-enumeration utilities for the Causal Origin Benchmark.
+- A narrow recorded Hugging Face causal-LM adapter. It runs a local concrete
+  `GPT2LMHeadModel` through ModelBlame's occurrence ledger, complete checkpoint,
+  unchanged audit, counterfactual replay and evidence paths. The supported v1
+  profile is CPU fp32 strict training with the byte tokenizer, eager attention,
+  zero dropout, Transformers 4.57.x, and exact recorded runtime-package
+  restoration.
+- Model state alias recording and validation for tied parameters, GPT-2
+  input/output embeddings included.
 
 ### Security
 
@@ -39,3 +47,6 @@ versioning once releases are tagged.
   subset rather than Python's backtracking engine.
 - Artifact loading avoids pickle, dynamic code from manifests, shell parsing,
   implicit model downloads, and writes outside declared output roots.
+- The recorded Hugging Face path rejects remote and custom code, Hub downloads,
+  pickle-backed and sharded model weights, unknown architectures, and `Trainer`
+  histories. It fails closed instead of degrading replay completeness.

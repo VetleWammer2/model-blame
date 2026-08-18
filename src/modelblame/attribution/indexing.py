@@ -344,11 +344,13 @@ def build_indexes(
                 scores=scores,
                 projection_seed=projection_seed,
             )
-    base = run.path / "indexes" / contract_hash
+    # Flat layout, full content hashes. Two nested 64-character hashes blow past
+    # the legacy Windows directory-path limit for otherwise valid runs created
+    # under pytest or a user profile directory.
+    base = run.path / "indexes"
     for method, index in indexes.items():
-        destination = base / f"{method}-{index.content_hash}"
-        destination.mkdir(parents=True, exist_ok=True)
-        index.write(destination / "index.json")
+        destination = base / f"{method}-{index.content_hash}.json"
+        index.write(destination)
     rows = [
         score.to_dict()
         for method in sorted(indexes)
@@ -356,5 +358,5 @@ def build_indexes(
     ]
     if rows:
         base.mkdir(parents=True, exist_ok=True)
-        pq.write_table(pa.Table.from_pylist(rows), base / "candidate-ranking.parquet")
+        pq.write_table(pa.Table.from_pylist(rows), base / f"{contract_hash}.parquet")
     return indexes

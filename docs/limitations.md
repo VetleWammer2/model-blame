@@ -11,18 +11,40 @@ The intended audited path is deliberately narrow:
 - single-process, single-device prompt/completion supervised fine-tuning;
 - decoder-only causal language models;
 - the built-in small transformer and deterministic tokenizer;
-- a guarded local Hugging Face causal-LM loader, without automatic downloads or
-  remote code; it is not an end-to-end training/replay adapter;
+- one recorded Hugging Face profile: a local concrete
+  `GPT2Config`/`GPT2LMHeadModel`, ModelBlame's byte tokenizer and transition
+  loop, CPU fp32 strict execution, eager attention, zero dropout,
+  full-parameter AdamW, and Transformers 4.57.x with exact restore-version
+  matching;
 - full-parameter training for small models and controlled LoRA training for larger local models;
 - AdamW, deterministic packing, gradient accumulation, and periodic complete checkpoints;
 - JSONL and Parquet input whose training-relevant fields fit the experiment schema;
 - `GRADIENT_ABLATE` with `FIXED_DENOMINATOR` or `RENORMALIZED` semantics.
 
-Support is conditional on an adapter being able to reconstruct exact recorded batches, serialize every required state component safely, and evaluate the declared scorer. A model architecture being loadable by a third-party library does not by itself make its training loop replayable by ModelBlame.
+Support is conditional on an adapter being able to reconstruct exact recorded batches, serialize every required state component safely, and evaluate the declared scorer. A model architecture being loadable by a third-party library does not by itself make its training loop replayable by ModelBlame. The Hugging Face profile is supported because ModelBlame owns the recording and the transition. It is not a claim that an external Hugging Face history can be imported.
+
+For that profile: construction from the local configuration, or from one local
+unsharded `model.safetensors`. Outside the boundary: arbitrary architectures and
+tokenizers, nonzero dropout, LoRA, gradient checkpointing, mixed precision,
+accelerators, sharded files, pickle-backed artifacts, remote code, downloads.
+Tokenizers, SafeTensors and Accelerate package versions are recorded alongside
+Transformers and must match the run's adapter compatibility during audit and
+counterfactual replay. Passing these gates makes a run eligible for audit. It
+does not guarantee a `BITWISE` grade.
+
+The v1 parser bounds GPT-2 configuration dimensions before model allocation:
+4,096 positions, embedding size 1,024, 24 layers, 64 heads, inner size 4,096, an
+estimated maximum of 50 million parameters. Safety and supported-profile bounds,
+not performance claims.
 
 ## Unsupported training procedures
 
-v0.1 does not support DDP, FSDP, tensor or pipeline parallelism, multi-node execution, pretraining-scale histories, arbitrary training scripts, DPO, PPO, GRPO, diffusion, vision, multimodal training, or preference-pair interventions. It does not rewrite user training code to capture missing provenance.
+v0.1 does not support `transformers.Trainer`, `TrainingArguments` or
+`resume_from_checkpoint` histories; DDP, FSDP, tensor or pipeline parallelism;
+multi-node execution; pretraining-scale histories; arbitrary training scripts;
+DPO, PPO, GRPO, diffusion, vision, multimodal training; preference-pair
+interventions. It does not rewrite user training code to capture missing
+provenance.
 
 Clean-baseline addition and reserved no-op-slot injection are not implemented by
 the v0.1 replay engine. They are a declared extension point for controlled
@@ -39,7 +61,7 @@ ModelBlame cannot reconstruct information that was not captured. A final checkpo
 
 Deterministic flags do not prove reproducibility. [PyTorch explicitly does not guarantee](https://docs.pytorch.org/docs/stable/notes/randomness.html) identical results across releases, platforms, or CPU/GPU execution. CUDA libraries, drivers, hardware, compiler settings, BLAS thread scheduling, and kernel choices can all change floating-point trajectories.
 
-A `BITWISE` grade covers only the audited interval in the recorded compatibility class. `NUMERIC` tolerances can hide small state differences that amplify later. `STATISTICAL` replay establishes a distributional comparison under tested seed sets, not the counterfactual endpoint of one deterministic model. A replay that works over one short checkpoint interval may still fail over a longer interval or after a different intervention.
+A `BITWISE` grade covers only the audited interval in the recorded compatibility class. For the Hugging Face profile that class holds the normalized GPT-2 configuration and profile, the eager-attention setting, the exact Transformers version, and the other recorded adapter package versions. It does not generalize to a different version or backend. `NUMERIC` tolerances can hide small state differences that amplify later. `STATISTICAL` replay establishes a distributional comparison under tested seed sets, not the counterfactual endpoint of one deterministic model. A replay that works over one short checkpoint interval may still fail over a longer interval or after a different intervention.
 
 ## Intervention semantics are not physical deletion
 
