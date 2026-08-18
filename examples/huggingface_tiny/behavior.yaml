@@ -1,0 +1,33 @@
+schema_version: 1
+id: huggingface-recorded-replay
+scorer:
+  type: sequence_nll
+  completion: " works."
+aggregation:
+  type: mean
+direction: less_is_present
+present_threshold: 25.0
+required_effect: 5.0
+search:
+  prompts:
+    - "HF replay"
+    - "Recorded HF training"
+holdout:
+  sealed: true
+  prompts:
+    - "Offline HF replay"
+controls:
+  - id: unrelated-completion
+    scorer:
+      type: sequence_nll
+      completion: " stays stable."
+    prompts:
+      - "A control phrase"
+    max_mean_drift: 20.0
+    max_item_drift: 20.0
+statistics:
+  confidence_level: 0.95
+  bootstrap_samples: 200
+  bootstrap_seed: 31415
+  seed_policy: fixed
+monotonicity: none

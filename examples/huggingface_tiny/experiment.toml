@@ -1,0 +1,41 @@
+schema_version = 1
+name = "huggingface-tiny-offline"
+adapter = "huggingface"
+seed = 31415
+determinism = "strict"
+
+[dataset]
+path = "data/train.jsonl"
+format = "jsonl"
+source = "offline-hf-demo"
+metadata_fields = ["family"]
+
+[tokenizer]
+type = "byte"
+
+[model]
+architecture = "huggingface"
+local_path = "model"
+initialization = "from_config"
+vocab_size = 260
+context_length = 48
+
+[optimizer]
+type = "adamw"
+lr = 0.03
+weight_decay = 0.0
+
+[scheduler]
+type = "constant"
+warmup_steps = 0
+
+[training]
+steps = 6
+batch_size = 1
+gradient_accumulation = 1
+device = "cpu"
+precision = "fp32"
+max_grad_norm = 1.0
+
+[checkpoints]
+interval = 3

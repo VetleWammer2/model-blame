@@ -1,8 +1,9 @@
 # Recorded run format
 
-A ModelBlame run is an immutable, versioned record of a training program. The
-built-in harness writes schema version 1. Replay reads recorded batch events;
-the original source dataset is not the replay input.
+A ModelBlame run is an immutable, versioned record of a training program. Both
+registered adapters write schema version 1 through the same ModelBlame-owned
+transition loop. Replay reads recorded batch events. The original source dataset
+is not the replay input.
 
 ## Directory layout
 
@@ -50,8 +51,9 @@ oversized metadata, and unsafe relative paths.
 | `modelblame_version` | Package version that wrote the run. |
 | `run_id` | Generated `mb_...` identifier. |
 | `run_hash` | Canonical SHA-256 identity described below. |
-| `adapter_id` | Trusted adapter implementation identity. |
-| `model_config` | Reconstructable model configuration. |
+| `adapter_id` | Canonical trusted adapter implementation identity. |
+| `adapter_compatibility` | Adapter-specific environment/configuration boundary; a nonempty value is also stored in `environment.json`. |
+| `model_config` | Self-contained reconstructable model configuration. |
 | `optimizer_config` | AdamW kind and hyperparameters. |
 | `scheduler_config` | Schedule kind and warmup steps. |
 | `precision` | Recorded training precision. |
@@ -90,7 +92,12 @@ complete.
 
 `environment.json` records the Python and PyTorch versions, platform string,
 CUDA runtime, CUDA availability, device count, and GPU names visible to the
-process.
+process. An adapter that declares a further compatibility boundary stores it as
+`adapter_compatibility` in both `environment.json` and the run manifest. Readers
+require the two to agree. For the recorded Hugging Face v1 profile that object
+holds the profile and model-class names, normalized configuration hash,
+attention implementation, and the installed Transformers, Tokenizers,
+SafeTensors and Accelerate versions.
 
 Inside Git, `code.json` records repository root, commit, branch, dirty flag,
 SHA-256 of the binary dirty diff, the experiment-configuration file hash, and
@@ -106,6 +113,16 @@ index.
 
 These identities scope an audit. A successful replay on one platform does not
 claim cross-version or cross-platform equivalence.
+
+For `modelblame.huggingface-causal-lm.v1`, `model_config` embeds the normalized
+concrete GPT-2 configuration and its canonical hash, context length, profile,
+model type and class, eager-attention policy, the exact Hugging Face runtime
+package versions, the initialization mode, and the source configuration and
+weight hashes. Replay builds the model from that embedded declaration and the
+restored tensors. It does not reopen the original local model directory. A
+`from_pretrained` source is accepted only as one local unsharded
+`model.safetensors`. `from_config` records that no source weight file was
+consumed.
 
 ## Dataset record
 
@@ -231,7 +248,13 @@ as a replay start. See [Checkpoint format](checkpoint-format.md).
 
 ## Compatibility rule
 
-Version 0.1 readers support only schema version 1 and the exact built-in adapter
-identity where reconstruction is required. Copying a run is safe; editing it is
-not. Any tool that repairs or migrates a future run format must write a new
-artifact and preserve the original rather than silently reinterpret version 1.
+Version 0.1 readers support only schema version 1 and, where reconstruction is
+required, only the fixed package-owned adapter registry. The canonical IDs today
+are `modelblame.tiny-causal-lm.v1` and `modelblame.huggingface-causal-lm.v1`. An
+ID in a run is never read as a Python import path. The Hugging Face adapter also
+requires Transformers 4.57.x and an exact installed Hugging Face runtime package
+match with the recorded configuration.
+
+Copying a run is safe. Editing it is not. Any tool that repairs or migrates a
+future run format must write a new artifact and keep the original, rather than
+silently reinterpret version 1.

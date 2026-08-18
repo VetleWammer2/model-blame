@@ -6,7 +6,7 @@ import dataclasses
 import math
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 import torch
 from torch import nn
@@ -116,21 +116,52 @@ class DeterministicLRScheduler:
         }
 
     def load_state_dict(self, state: Mapping[str, Any]) -> None:
-        if int(state.get("schema_version", 0)) != self.schema_version:
+        required = {
+            "schema_version",
+            "schedule",
+            "warmup_steps",
+            "total_steps",
+            "step_index",
+            "base_lrs",
+        }
+        if set(state) != required or state.get("schema_version") != self.schema_version:
             raise ValueError("unsupported scheduler state schema")
         if state["schedule"] != self.schedule:
             raise ValueError("scheduler kind does not match checkpoint")
-        self.warmup_steps = int(state["warmup_steps"])
-        self.total_steps = int(state["total_steps"])
-        self.step_index = int(state["step_index"])
-        self.base_lrs = [float(value) for value in state["base_lrs"]]
-        if len(self.base_lrs) != len(self.optimizer.param_groups):
-            raise ValueError("scheduler parameter-group count mismatch")
+        if (
+            not isinstance(state["warmup_steps"], int)
+            or isinstance(state["warmup_steps"], bool)
+            or state["warmup_steps"] != self.warmup_steps
+            or not isinstance(state["total_steps"], int)
+            or isinstance(state["total_steps"], bool)
+            or state["total_steps"] != self.total_steps
+        ):
+            raise ValueError("scheduler configuration does not match checkpoint")
+        step_index = state["step_index"]
+        if (
+            not isinstance(step_index, int)
+            or isinstance(step_index, bool)
+            or not 0 <= step_index <= self.total_steps
+        ):
+            raise ValueError("scheduler step index is invalid")
+        base_lrs = state["base_lrs"]
+        if (
+            not isinstance(base_lrs, list)
+            or any(
+                not isinstance(value, int | float) or isinstance(value, bool)
+                for value in base_lrs
+            )
+            or [float(value) for value in base_lrs] != self.base_lrs
+        ):
+            raise ValueError("scheduler base learning rates do not match checkpoint")
+        self.step_index = step_index
         self._apply()
 
 
 @dataclass(slots=True)
 class ExperimentState:
+    adapter_id: ClassVar[str] = "modelblame.tiny-causal-lm.v1"
+
     model: nn.Module
     optimizer: torch.optim.AdamW
     scheduler: DeterministicLRScheduler
@@ -172,17 +203,24 @@ def normalize_training_config(
         raise ValueError(
             "the tiny causal-LM adapter requires the deterministic byte tokenizer"
         )
+    model_config: TinyCausalLMConfig | TinyLlamaConfig
+    if architecture == "llama_style":
+        model_config = TinyLlamaConfig.from_mapping(model_section)
+    else:
+        model_config = TinyCausalLMConfig.from_mapping(model_section)
+    return model_config, normalize_training_settings(root)
+
+
+def normalize_training_settings(config: Any) -> TrainingConfig:
+    """Normalize the adapter-independent recorded transition settings."""
+
+    root = _as_mapping(config)
     optimizer_section = _as_mapping(root.get("optimizer", {}))
     scheduler_section = _as_mapping(root.get("scheduler", {}))
     training_section = _as_mapping(root.get("training", {}))
     checkpoint_section = _as_mapping(
         root.get("checkpoints", root.get("checkpoint", {}))
     )
-    model_config: TinyCausalLMConfig | TinyLlamaConfig
-    if architecture == "llama_style":
-        model_config = TinyLlamaConfig.from_mapping(model_section)
-    else:
-        model_config = TinyCausalLMConfig.from_mapping(model_section)
     betas_value = optimizer_section.get("betas", (0.9, 0.999))
     seed_value = training_section.get("seed")
     if seed_value is None:
@@ -226,7 +264,7 @@ def normalize_training_config(
         ),
         checkpoint_interval=int(checkpoint_section.get("interval", 5)),
     )
-    return model_config, training_config
+    return training_config
 
 
 def build_experiment_state(config: Any, *, device: torch.device) -> ExperimentState:

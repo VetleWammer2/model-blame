@@ -38,11 +38,19 @@ class TrainingCursor:
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> TrainingCursor:
-        allowed = set(cls.__dataclass_fields__)
-        unknown = set(value) - allowed
+        required = set(cls.__dataclass_fields__)
+        unknown = set(value) - required
         if unknown:
             raise ValueError(f"unknown cursor fields: {sorted(unknown)}")
-        cursor = cls(**{key: int(item) for key, item in value.items()})
+        missing = required - set(value)
+        if missing:
+            raise ValueError(f"missing cursor fields: {sorted(missing)}")
+        if any(
+            not isinstance(item, int) or isinstance(item, bool)
+            for item in value.values()
+        ):
+            raise ValueError("cursor fields must be integers")
+        cursor = cls(**dict(value))
         cursor.validate()
         return cursor
 

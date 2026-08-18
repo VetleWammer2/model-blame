@@ -10,10 +10,12 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 import pyarrow.parquet as pq
+import torch
 import yaml
 from safetensors import safe_open
 from safetensors.torch import load_file
 
+from modelblame.adapters.registry import adapter_source_path
 from modelblame.behavior.contract import load_contract_artifact
 from modelblame.checkpoint.hashing import canonical_json_hash, hash_tensors
 from modelblame.data.identity import EXAMPLE_ID_PATTERN, OCCURRENCE_ID_PATTERN
@@ -269,6 +271,11 @@ def _verify_counterfactual_model(root: Path, certificate: EvidenceCertificate) -
     if checkpoint_manifest.get("schema_version") != 1:
         raise VerificationError("unsupported counterfactual checkpoint manifest")
     _same_value(
+        "counterfactual checkpoint hash",
+        canonical_json_hash(checkpoint_manifest),
+        certificate.counterfactual_checkpoint_hash,
+    )
+    _same_value(
         "counterfactual tokenizer fingerprint",
         checkpoint_manifest.get("tokenizer_fingerprint"),
         certificate.tokenizer_fingerprint,
@@ -276,11 +283,26 @@ def _verify_counterfactual_model(root: Path, certificate: EvidenceCertificate) -
     model_declaration = checkpoint_manifest.get("model")
     if not isinstance(model_declaration, Mapping):
         raise VerificationError("counterfactual checkpoint has no model declaration")
+    model_schema = model_declaration.get("schema_version")
+    if model_schema not in {1, 2} or set(model_declaration) != {
+        "schema_version",
+        "state_hash",
+        "tensors",
+        "aliases",
+    }:
+        raise VerificationError("unsupported counterfactual model declaration")
     model_path = root / "counterfactual" / "model.safetensors"
     try:
         with safe_open(model_path, framework="pt", device="cpu") as handle:
             keys = set(handle.keys())
             file_metadata = handle.metadata() or {}
+        if (
+            file_metadata.get("schema_version") != str(model_schema)
+            or file_metadata.get("format") != "modelblame-model-state"
+        ):
+            raise VerificationError(
+                "counterfactual model SafeTensors metadata differs from its manifest"
+            )
         declared_tensors = model_declaration.get("tensors")
         if not isinstance(declared_tensors, Mapping) or keys != set(declared_tensors):
             raise VerificationError(
@@ -297,6 +319,32 @@ def _verify_counterfactual_model(root: Path, certificate: EvidenceCertificate) -
                 raise VerificationError(
                     f"counterfactual tensor shape/dtype mismatch: {name}"
                 )
+        aliases = model_declaration.get("aliases")
+        if not isinstance(aliases, list):
+            raise VerificationError("counterfactual model aliases are malformed")
+        seen_aliases: set[str] = set()
+        for group in aliases:
+            if (
+                not isinstance(group, list)
+                or len(group) < 2
+                or any(
+                    not isinstance(name, str) or name not in tensors for name in group
+                )
+                or group != sorted(set(group))
+                or seen_aliases.intersection(group)
+            ):
+                raise VerificationError("counterfactual model aliases are malformed")
+            seen_aliases.update(group)
+            reference = tensors[group[0]].contiguous().view(torch.uint8)
+            if any(
+                not torch.equal(reference, tensors[name].contiguous().view(torch.uint8))
+                for name in group[1:]
+            ):
+                raise VerificationError(
+                    "counterfactual aliased model tensors contain unequal values"
+                )
+        if aliases != sorted(aliases) or (model_schema == 1 and aliases):
+            raise VerificationError("counterfactual model aliases are malformed")
         state_hash = hash_tensors(tensors)
         if state_hash != model_declaration.get(
             "state_hash"
@@ -518,9 +566,13 @@ def _verify_source_run(
         certificate.tokenizer_fingerprint,
     )
     _same_value("adapter ID", run.manifest.get("adapter_id"), certificate.adapter.id)
-    if certificate.adapter.id == "modelblame.tiny-causal-lm.v1":
-        adapter_path = Path(__file__).parents[1] / "adapters" / "tiny_causal_lm.py"
-        _same_value("adapter hash", sha256_file(adapter_path), certificate.adapter.hash)
+    try:
+        adapter_path = adapter_source_path(certificate.adapter.id)
+    except ValueError as error:
+        raise VerificationError(
+            f"source run uses an untrusted adapter: {error}"
+        ) from error
+    _same_value("adapter hash", sha256_file(adapter_path), certificate.adapter.hash)
     _same_value(
         "training code identity",
         run.manifest.get("training_code_identity"),

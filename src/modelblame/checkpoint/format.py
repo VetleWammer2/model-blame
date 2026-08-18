@@ -14,7 +14,7 @@ from typing import Any
 import torch
 from safetensors import safe_open
 
-from modelblame.adapters.tiny_causal_lm import ByteTokenizer
+from modelblame.adapters.registry import normalize_adapter_id
 from modelblame.checkpoint.cursor import load_cursor, save_cursor
 from modelblame.checkpoint.hashing import canonical_json_hash, hash_file
 from modelblame.checkpoint.model import (
@@ -76,6 +76,24 @@ def _safe_scaler_state(scaler: Any | None) -> dict[str, Any]:
     return {"schema_version": 1, "enabled": bool(scaler.is_enabled()), "state": state}
 
 
+def _validate_scaler_state(value: Any) -> Mapping[str, Any]:
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != {"schema_version", "enabled", "state"}
+        or value.get("schema_version") != 1
+        or not isinstance(value.get("enabled"), bool)
+        or not isinstance(value.get("state"), Mapping)
+        or (not value["enabled"] and value["state"] != {})
+    ):
+        raise ValueError("mixed-precision scaler checkpoint is malformed")
+    if any(
+        not isinstance(item, bool | int | float | str) and item is not None
+        for item in value["state"].values()
+    ):
+        raise ValueError("mixed-precision scaler state contains unsafe values")
+    return value
+
+
 def _checkpoint_files(path: Path) -> list[Path]:
     return sorted(
         item for item in path.iterdir() if item.is_file() and item.name != "hashes.json"
@@ -131,9 +149,10 @@ def save_checkpoint(state: Any, destination: Path) -> CheckpointManifest:
             "cursor": canonical_json_hash(state.cursor.to_dict()),
             "gradients": str(gradient_metadata["state_hash"]),
         }
+        adapter_id = normalize_adapter_id(getattr(state, "adapter_id", None))
         manifest_value: dict[str, Any] = {
             "schema_version": CHECKPOINT_SCHEMA_VERSION,
-            "adapter_id": "modelblame.tiny-causal-lm.v1",
+            "adapter_id": adapter_id,
             "global_step": state.cursor.global_step,
             "state_hashes": state_hashes,
             "model_config": state.model_config.to_dict(),
@@ -176,8 +195,26 @@ def verify_checkpoint(path: Path) -> str:
     hashes = _read_json(path / "hashes.json")
     if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
         raise ValueError("unsupported checkpoint manifest")
+    required_manifest_fields = {
+        "schema_version",
+        "adapter_id",
+        "global_step",
+        "state_hashes",
+        "model_config",
+        "training_config",
+        "tokenizer_fingerprint",
+        "model",
+        "gradients",
+    }
+    if set(manifest) != required_manifest_fields:
+        raise ValueError("checkpoint manifest fields are incomplete or unexpected")
+    canonical_adapter = normalize_adapter_id(manifest.get("adapter_id"))
+    if canonical_adapter != manifest.get("adapter_id"):
+        raise ValueError("checkpoint manifest must use a canonical adapter ID")
     if not isinstance(hashes, dict) or hashes.get("schema_version") != 1:
         raise ValueError("unsupported checkpoint hash manifest")
+    if set(hashes) != {"schema_version", "files", "checkpoint_hash"}:
+        raise ValueError("checkpoint hash manifest fields are incomplete or unexpected")
     expected_names = {
         "manifest.json",
         "model.safetensors",
@@ -192,6 +229,12 @@ def verify_checkpoint(path: Path) -> str:
     }
     if set(hashes.get("files", {})) != expected_names:
         raise ValueError("checkpoint file set is incomplete or unexpected")
+    entries = tuple(path.iterdir())
+    actual_entries = {item.name for item in entries}
+    if actual_entries != expected_names | {"hashes.json"} or any(
+        item.is_symlink() or not item.is_file() for item in entries
+    ):
+        raise ValueError("checkpoint physical file set is incomplete or unexpected")
     for filename, expected_hash in hashes["files"].items():
         candidate = path / filename
         if not candidate.is_file() or hash_file(candidate) != expected_hash:
@@ -199,9 +242,21 @@ def verify_checkpoint(path: Path) -> str:
     optimizer_metadata = _read_json(path / "optimizer.json")
     scheduler_metadata = _read_json(path / "scheduler.json")
     scaler_metadata = _read_json(path / "scaler.json")
+    _validate_scaler_state(scaler_metadata)
     rng_metadata = _read_json(path / "rng.json")
     cursor = load_cursor(path / "cursor.json")
     state_hashes = manifest.get("state_hashes", {})
+    required_state_hashes = {
+        "model",
+        "optimizer",
+        "scheduler",
+        "scaler",
+        "rng",
+        "cursor",
+        "gradients",
+    }
+    if not isinstance(state_hashes, dict) or set(state_hashes) != required_state_hashes:
+        raise ValueError("checkpoint state hashes are incomplete or unexpected")
     expected_state_hashes = {
         "model": manifest.get("model", {}).get("state_hash"),
         "optimizer": canonical_json_hash(
@@ -259,7 +314,7 @@ def verify_checkpoint(path: Path) -> str:
 
 
 def load_checkpoint(path: Path, *, device: torch.device | str = "cpu") -> Any:
-    """Validate, reconstruct, and restore a built-in experiment state."""
+    """Validate, reconstruct, and restore a trusted adapter experiment state."""
 
     from modelblame.training.determinism import configure_determinism
     from modelblame.training.state import build_experiment_state
@@ -267,34 +322,48 @@ def load_checkpoint(path: Path, *, device: torch.device | str = "cpu") -> Any:
     checkpoint_path = path.resolve(strict=True)
     verify_checkpoint(checkpoint_path)
     manifest = _read_json(checkpoint_path / "manifest.json")
-    if manifest.get("adapter_id") != "modelblame.tiny-causal-lm.v1":
-        raise ValueError("checkpoint adapter is unavailable")
-    tokenizer = ByteTokenizer()
-    if tokenizer.fingerprint != manifest.get("tokenizer_fingerprint"):
-        raise ValueError("tokenizer fingerprint does not match built-in tokenizer")
-    config = {
-        "model": manifest["model_config"],
-        "optimizer": {
-            "lr": manifest["training_config"]["learning_rate"],
-            "betas": manifest["training_config"]["betas"],
-            "eps": manifest["training_config"]["eps"],
-            "weight_decay": manifest["training_config"]["weight_decay"],
-            "maximize": manifest["training_config"].get("maximize", False),
-            "capturable": manifest["training_config"].get("capturable", False),
-        },
-        "scheduler": {
-            "type": manifest["training_config"]["scheduler"],
-            "warmup_steps": manifest["training_config"]["warmup_steps"],
-        },
-        "training": manifest["training_config"],
-        "checkpoints": {"interval": manifest["training_config"]["checkpoint_interval"]},
-    }
     configure_determinism(
         str(manifest["training_config"]["determinism"]),
         int(manifest["training_config"]["seed"]),
     )
     torch_device = torch.device(device)
-    state = build_experiment_state(config, device=torch_device)
+    adapter_id = normalize_adapter_id(manifest.get("adapter_id"))
+    state: Any
+    if adapter_id == "modelblame.tiny-causal-lm.v1":
+        config = {
+            "model": manifest["model_config"],
+            "optimizer": {
+                "lr": manifest["training_config"]["learning_rate"],
+                "betas": manifest["training_config"]["betas"],
+                "eps": manifest["training_config"]["eps"],
+                "weight_decay": manifest["training_config"]["weight_decay"],
+                "maximize": manifest["training_config"].get("maximize", False),
+                "capturable": manifest["training_config"].get("capturable", False),
+            },
+            "scheduler": {
+                "type": manifest["training_config"]["scheduler"],
+                "warmup_steps": manifest["training_config"]["warmup_steps"],
+            },
+            "training": manifest["training_config"],
+            "checkpoints": {
+                "interval": manifest["training_config"]["checkpoint_interval"]
+            },
+        }
+        state = build_experiment_state(config, device=torch_device)
+    elif adapter_id == "modelblame.huggingface-causal-lm.v1":
+        from modelblame.adapters.huggingface import (
+            build_huggingface_state_from_checkpoint,
+        )
+
+        state = build_huggingface_state_from_checkpoint(
+            model_config_value=manifest["model_config"],
+            training_config_value=manifest["training_config"],
+            device=torch_device,
+        )
+    else:  # pragma: no cover - registry normalization rejects unknown IDs
+        raise ValueError("checkpoint adapter is unavailable")
+    if state.tokenizer.fingerprint != manifest.get("tokenizer_fingerprint"):
+        raise ValueError("tokenizer fingerprint does not match checkpoint state")
     load_model(
         state.model,
         checkpoint_path / "model.safetensors",
@@ -308,10 +377,18 @@ def load_checkpoint(path: Path, *, device: torch.device | str = "cpu") -> Any:
         checkpoint_path / "optimizer.safetensors",
         optimizer_metadata,
         device=torch_device,
+        expected_initialized=int(manifest["global_step"]) > 0,
     )
     scheduler_state = _read_json(checkpoint_path / "scheduler.json")
     state.scheduler.load_state_dict(scheduler_state)
-    scaler_state = _read_json(checkpoint_path / "scaler.json")
+    if state.scheduler.step_index != int(manifest["global_step"]):
+        raise ValueError("scheduler step does not match checkpoint manifest")
+    scaler_state = _validate_scaler_state(_read_json(checkpoint_path / "scaler.json"))
+    restored_scaler_enabled = bool(
+        state.scaler is not None and state.scaler.is_enabled()
+    )
+    if bool(scaler_state.get("enabled")) != restored_scaler_enabled:
+        raise ValueError("checkpoint mixed-precision scaler compatibility mismatch")
     if scaler_state.get("enabled"):
         if state.scaler is None:
             raise ValueError("checkpoint requires a mixed-precision scaler")
@@ -324,6 +401,7 @@ def load_checkpoint(path: Path, *, device: torch.device | str = "cpu") -> Any:
         checkpoint_path / "gradients.safetensors",
         manifest["gradients"],
         device=torch_device,
+        require_complete=int(manifest["global_step"]) > 0,
     )
     rng_metadata = _read_json(checkpoint_path / "rng.json")
     restore_rng_state(
