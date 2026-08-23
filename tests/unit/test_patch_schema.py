@@ -11,6 +11,7 @@ from modelblame.patch.schema import (
     LossNormalization,
     Patch,
     PatchValidationError,
+    ReservedSlotInjectOperation,
     ReweightOperation,
     parse_patch,
 )
@@ -56,6 +57,38 @@ def test_patch_json_round_trip_checks_context_and_ledger() -> None:
         known_occurrence_ids={_occurrence()},
     )
     assert restored == patch
+
+
+def test_reserved_slot_injection_round_trip_and_isolation() -> None:
+    occurrence = _occurrence()
+    patch = Patch.create(
+        run_id="mb_test",
+        run_hash="a" * 64,
+        behavior_contract_hash="b" * 64,
+        operations=[ReservedSlotInjectOperation(occurrence_ids=(occurrence,))],
+    )
+    restored = parse_patch(
+        patch.model_dump(mode="json"), known_occurrence_ids={occurrence}
+    )
+    assert isinstance(restored.operations[0], ReservedSlotInjectOperation)
+    with pytest.raises(ValidationError, match="cannot be mixed"):
+        Patch(
+            run_id="mb_test",
+            run_hash="a" * 64,
+            behavior_contract_hash="b" * 64,
+            operations=(
+                ReservedSlotInjectOperation(occurrence_ids=(occurrence,)),
+                GradientAblateOperation(occurrence_ids=(_occurrence(1),)),
+            ),
+        )
+
+
+def test_reserved_slot_injection_requires_fixed_denominator() -> None:
+    with pytest.raises(ValidationError, match="FIXED_DENOMINATOR"):
+        ReservedSlotInjectOperation(
+            occurrence_ids=(_occurrence(),),
+            normalization=LossNormalization.RENORMALIZED,
+        )
 
 
 def test_patch_rejects_content_tampering() -> None:

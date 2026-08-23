@@ -67,11 +67,14 @@ class OccurrenceSpan:
     original_loss_weight: float
     left_truncated_tokens: int = 0
     right_truncated_tokens: int = 0
+    reserved_noop: bool = False
+    injection_loss_weights: tuple[float, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
         value["prompt_token_mask"] = list(self.prompt_token_mask)
         value["completion_token_mask"] = list(self.completion_token_mask)
+        value["injection_loss_weights"] = list(self.injection_loss_weights)
         return value
 
 
@@ -105,20 +108,41 @@ class DeterministicPacker:
         *,
         context_length: int,
         batch_size: int,
+        reserved_noop_slots: int = 0,
         run_id: str,
         cursor: TrainingCursor,
     ) -> None:
         if context_length < 4 or batch_size <= 0 or not run_id:
             raise ValueError("invalid deterministic packer configuration")
-        self.dataset = dataset
+        if not 0 <= reserved_noop_slots < batch_size:
+            raise ValueError("reserved_noop_slots must be in [0, batch_size)")
         self.tokenizer = tokenizer
         self.context_length = context_length
         self.batch_size = batch_size
+        self.reserved_noop_slots = reserved_noop_slots
         self.run_id = run_id
         self.cursor = cursor
         self.cursor.validate()
-        if self.cursor.source_row >= len(dataset):
+        self.dataset = tuple(dataset)
+        self.reserved_dataset = tuple(
+            example for example in dataset if example.reserved_noop
+        )
+        if not any(not example.reserved_noop for example in self.dataset):
+            raise ValueError("the active training dataset is empty")
+        if bool(self.reserved_noop_slots) != bool(self.reserved_dataset):
+            raise ValueError(
+                "reserved no-op slots require reserved dataset examples and vice versa"
+            )
+        if self.cursor.source_row >= len(self.dataset):
             raise ValueError("cursor source row is outside dataset")
+        self._skip_reserved_rows()
+
+    def _skip_reserved_rows(self) -> None:
+        while self.dataset[self.cursor.source_row].reserved_noop:
+            self.cursor.source_row += 1
+            if self.cursor.source_row == len(self.dataset):
+                self.cursor.source_row = 0
+                self.cursor.epoch += 1
 
     def _peek(self) -> tuple[IndexedExample, int]:
         return self.dataset[self.cursor.source_row], self.cursor.epoch
@@ -129,6 +153,7 @@ class DeterministicPacker:
         if self.cursor.source_row == len(self.dataset):
             self.cursor.source_row = 0
             self.cursor.epoch += 1
+        self._skip_reserved_rows()
 
     def _encoded(
         self, example: IndexedExample
@@ -162,7 +187,9 @@ class DeterministicPacker:
         self, *, global_step: int, microbatch_index: int
     ) -> PackedMicrobatch:
         sequences: list[PackedSequence] = []
-        for batch_position in range(self.batch_size):
+        active_batch_size = self.batch_size - self.reserved_noop_slots
+        microbatch_ordinal = self.cursor.packed_sequence_count // self.batch_size
+        for batch_position in range(active_batch_size):
             token_ids: list[int] = []
             loss_weights: list[float] = []
             pending: list[
@@ -272,6 +299,83 @@ class DeterministicPacker:
                     ),
                     loss_weights=tuple(loss_weights),
                     occurrences=tuple(spans),
+                    padding_tokens=padding,
+                )
+            )
+            self.cursor.packed_sequence_count += 1
+        for batch_position in range(active_batch_size, self.batch_size):
+            reserved_occurrence_index = (
+                microbatch_ordinal * self.reserved_noop_slots
+                + batch_position
+                - active_batch_size
+            )
+            reserved_index = reserved_occurrence_index % len(self.reserved_dataset)
+            example = self.reserved_dataset[reserved_index]
+            (
+                token_ids,
+                injection_weights,
+                prompt_mask,
+                completion_mask,
+                left_truncated,
+            ) = self._encoded(example)
+            unpadded_length = len(token_ids)
+            padding = self.context_length - unpadded_length
+            token_ids.extend([self.tokenizer.pad_token_id] * padding)
+            seed_value = {
+                "run_id": self.run_id,
+                "step": global_step,
+                "microbatch": microbatch_index,
+                "batch_position": batch_position,
+                "packed_sequence_count": self.cursor.packed_sequence_count,
+                "reserved_noop": True,
+                "example": example.example_id,
+            }
+            packed_id = (
+                "noop_"
+                + hashlib.sha256(
+                    json.dumps(
+                        seed_value, sort_keys=True, separators=(",", ":")
+                    ).encode()
+                ).hexdigest()
+            )
+            sequences.append(
+                PackedSequence(
+                    packed_sequence_id=packed_id,
+                    input_ids=tuple(token_ids),
+                    attention_mask=tuple(
+                        index < unpadded_length for index in range(self.context_length)
+                    ),
+                    loss_weights=(0.0,) * self.context_length,
+                    occurrences=(
+                        OccurrenceSpan(
+                            occurrence_id=_occurrence_id(
+                                run_id=self.run_id,
+                                global_step=global_step,
+                                microbatch_index=microbatch_index,
+                                batch_position=batch_position,
+                                token_start=0,
+                                token_end=unpadded_length,
+                                example_id=example.example_id,
+                            ),
+                            example_id=example.example_id,
+                            source=example.source,
+                            source_row=example.source_row,
+                            epoch=reserved_occurrence_index
+                            // len(self.reserved_dataset),
+                            global_step=global_step,
+                            microbatch_index=microbatch_index,
+                            batch_position=batch_position,
+                            packed_sequence_id=packed_id,
+                            token_start=0,
+                            token_end=unpadded_length,
+                            prompt_token_mask=tuple(prompt_mask),
+                            completion_token_mask=tuple(completion_mask),
+                            original_loss_weight=example.sample_weight,
+                            left_truncated_tokens=left_truncated,
+                            reserved_noop=True,
+                            injection_loss_weights=tuple(injection_weights),
+                        ),
+                    ),
                     padding_tokens=padding,
                 )
             )

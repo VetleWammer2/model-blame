@@ -78,19 +78,42 @@ def apply_occurrence_intervention(
             end = int(span["token_end"])
             if not 0 <= start < end <= weights.shape[1]:
                 raise ValueError(f"invalid token span for {occurrence_id}")
-            if occurrence_id in intervention.ablate_occurrence_ids:
+            if occurrence_id in intervention.inject_occurrence_ids:
+                if not bool(span.get("reserved_noop", False)):
+                    raise ValueError(
+                        f"occurrence {occurrence_id} is not a reserved no-op slot"
+                    )
+                injection_weights = span.get("injection_loss_weights", ())
+                if len(injection_weights) != end - start or torch.any(
+                    weights[batch_position, start:end] != 0
+                ):
+                    raise ValueError(
+                        f"reserved no-op slot {occurrence_id} is malformed"
+                    )
+                weights[batch_position, start:end] = weights.new_tensor(
+                    injection_weights
+                )
+            elif occurrence_id in intervention.ablate_occurrence_ids:
                 weights[batch_position, start:end] = 0.0
             elif occurrence_id in intervention.occurrence_weights:
                 weights[batch_position, start:end] *= float(
                     intervention.occurrence_weights[occurrence_id]
                 )
-    requested = set(intervention.ablate_occurrence_ids) | set(
-        intervention.occurrence_weights
+    requested = (
+        set(intervention.ablate_occurrence_ids)
+        | set(intervention.occurrence_weights)
+        | set(intervention.inject_occurrence_ids)
     )
     # It is valid for an intervention to target another step; only reject IDs
-    # that are present in both maps, which would be ambiguous.
-    conflicting = set(intervention.ablate_occurrence_ids) & set(
-        intervention.occurrence_weights
+    # that appear in conflicting intervention collections.
+    conflicting = (
+        set(intervention.ablate_occurrence_ids) & set(intervention.occurrence_weights)
+    ) | (
+        set(intervention.inject_occurrence_ids)
+        & (
+            set(intervention.ablate_occurrence_ids)
+            | set(intervention.occurrence_weights)
+        )
     )
     if conflicting:
         raise ValueError(f"conflicting intervention for {sorted(conflicting)[0]}")
@@ -99,18 +122,21 @@ def apply_occurrence_intervention(
 
 
 def per_occurrence_losses(
-    logits: torch.Tensor, batch: TrainingBatch
+    logits: torch.Tensor,
+    batch: TrainingBatch,
+    loss_weights: torch.Tensor | None = None,
 ) -> tuple[dict[str, float], dict[str, int]]:
-    """Report original weighted loss numerator for every packed occurrence."""
+    """Report the effective weighted loss numerator for each packed occurrence."""
 
+    effective_weights = batch.loss_weights if loss_weights is None else loss_weights
     result = masked_causal_loss(
         logits,
         batch.input_ids,
-        batch.loss_weights,
+        effective_weights,
         original_denominator=batch.original_loss_denominator,
     )
     shifted_loss = result.token_losses
-    shifted_weights = batch.loss_weights[:, 1:].to(shifted_loss.dtype)
+    shifted_weights = effective_weights[:, 1:].to(shifted_loss.dtype)
     values: dict[str, float] = {}
     counts: dict[str, int] = {}
     for batch_position, spans in enumerate(batch.occurrence_spans):

@@ -164,7 +164,7 @@ The full acceptance predicate covers replay validity, target effect, controls, a
 
 ### 4.2 Gradient ablation
 
-The mandatory v0.1 operation, `GRADIENT_ABLATE`, leaves a selected occurrence in the recorded batch and zeros its supervised-token loss contribution. Shapes, positions, other occurrences, the optimizer-step count and scheduler advancement all survive. It aims to preserve RNG consumption, subject to adapter behavior.
+The removal operation, `GRADIENT_ABLATE`, leaves a selected occurrence in the recorded batch and zeros its supervised-token loss contribution. Shapes, positions, other occurrences, the optimizer-step count and scheduler advancement all survive. It aims to preserve RNG consumption, subject to adapter behavior.
 
 For token losses $\ell_j$, weights $w_j$, original denominator $D$, and intervention mask $m_j$, fixed-denominator semantics use
 
@@ -182,6 +182,10 @@ L_{\mathrm{renorm}}^\pi=
 with an explicit zero-denominator rule. Renormalization can better match some mean-loss definitions but changes the magnitude of every remaining gradient. The certificate names the exact choice.
 
 Neither operation is equivalent to deleting a row and rebuilding the dataset. ModelBlame calls it gradient ablation.
+
+### 4.3 Reserved-slot injection
+
+The built-in tiny harness can declare trailing reserved rows in each microbatch. Their tokens and intended supervised weights are recorded, but their live loss weights are zero in the clean baseline. `RESERVED_SLOT_INJECT` restores the exact recorded weights for selected reserved occurrences under fixed-denominator normalization. Tokens, masks, batch shape, ordering, optimizer steps, scheduler progression, and unrelated contributions remain unchanged. The Hugging Face and external-adapter paths do not support this operation.
 
 ## 5. Safe, complete checkpoints
 
@@ -321,9 +325,9 @@ Global minimality is reserved for exhaustive cases such as the at-most-12-group 
 
 ## 10. Bidirectional evidence
 
-Removal tests ask whether ablating the selected contributions from the original history reduces the behavior. In a controlled clean-baseline harness, reserved no-op slots can support addition tests while step count, shape, ordering and scheduler progression stay fixed. If adding the selected events causes the behavior on the declared baseline, and removal eliminates it on the original run, the certificate may report `BIDIRECTIONAL_CAUSAL_EVIDENCE`.
+Removal tests ask whether ablating selected contributions from the original history reduces the behavior. In the built-in clean-baseline harness, reserved no-op slots support addition tests while step count, shape, ordering and scheduler progression stay fixed. These experiments can separately establish `NECESSARY_IN_CONTEXT` and `SUFFICIENT_ON_BASELINE`.
 
-Still evidence about two specified procedures. Not a universal sufficiency/necessity theorem. v0.1 does not generalize addition to arbitrary external histories.
+Version 1 cannot bind both directions into one certificate: `source_run`, patch, counterfactual checkpoint, replay grade, endpoint/control/holdout results, and occurrence IDs each describe one run-bound intervention. `BIDIRECTIONAL_CAUSAL_EVIDENCE` is therefore not a version-1 grade. A future aggregate would need to bind and verify two complete certificates. Addition also does not generalize to arbitrary external histories.
 
 ## 11. Statistical protocol
 
@@ -345,7 +349,6 @@ A search pass followed by holdout failure yields `SEARCH_PASSED` / `HOLDOUT_FAIL
 - `COUNTERFACTUAL_EFFECT`: an executed intervention changed the behavior.
 - `NECESSARY_IN_CONTEXT`: removal of the selected events passes target, controls, and final holdout under the recorded trajectory and semantics.
 - `SUFFICIENT_ON_BASELINE`: insertion into a declared clean baseline passes.
-- `BIDIRECTIONAL_CAUSAL_EVIDENCE`: both independent directions pass.
 - `INCONCLUSIVE`: replay, environment, statistics, specification, controls, or holdout do not support a valid conclusion.
 
 These are categorical evidence statements, not values on one “confidence” scale. Correlation, attribution, finite effect, contextual necessity, baseline sufficiency, minimality and global causality stay separate fields.
@@ -369,7 +372,7 @@ The bundle includes a runnable replay entry point for package-owned registered a
 
 The canonical certificate sentence is:
 
-> Under the recorded training procedure, environment scope, intervention semantics, and behavioral probes, ablating these occurrences produced the measured counterfactual effect.
+> Under the recorded training procedure, environment scope, intervention semantics, and behavioral probes, executing the declared intervention over these occurrences produced the measured counterfactual effect.
 
 ## 15. Evaluation program
 

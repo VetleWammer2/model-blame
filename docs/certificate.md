@@ -17,20 +17,24 @@ Version 1 uses these grades:
 | `ATTRIBUTED` | An event received a candidate score. No causal claim. |
 | `COUNTERFACTUAL_EFFECT` | An executed intervention changed the measured behavior. |
 | `NECESSARY_IN_CONTEXT` | Removing selected contributions from the recorded history meets the target and control contract. |
-| `SUFFICIENT_ON_BASELINE` | Adding selected events to a declared clean baseline meets the target and controls. |
-| `BIDIRECTIONAL_CAUSAL_EVIDENCE` | Independent removal and addition directions both pass. |
+| `SUFFICIENT_ON_BASELINE` | Activating selected built-in no-op rows on the recorded clean baseline meets the target and controls. |
 | `INCONCLUSIVE` | Replay, statistics, environment, or contract does not support a valid conclusion. |
 
 The required scope statement is stored in `claim_scope`:
 
 > Under the recorded training procedure, environment scope, intervention
-> semantics, and behavioral probes, ablating these occurrences produced the
-> measured counterfactual effect.
+> semantics, and behavioral probes, executing the declared intervention over
+> these occurrences produced the measured counterfactual effect.
 
-`NECESSARY_IN_CONTEXT`, `SUFFICIENT_ON_BASELINE`, and
-`BIDIRECTIONAL_CAUSAL_EVIDENCE` are strong grades. The schema rejects them when
-the replay grade is `FAILED` or `UNAUDITED`, when no controls are recorded, when
-any control fails, or when the sealed holdout status is not `PASSED`.
+`NECESSARY_IN_CONTEXT` and `SUFFICIENT_ON_BASELINE` are strong grades. The schema
+rejects them when the replay grade is `FAILED` or `UNAUDITED`, when no controls
+are recorded, when any control fails, or when the sealed holdout status is not
+`PASSED`. Sufficiency additionally requires recorded clean-baseline
+`RESERVED_SLOT_INJECT` semantics and an `ABSENT` to `PRESENT` endpoint change.
+
+`BIDIRECTIONAL_CAUSAL_EVIDENCE` is not a version-1 grade. Version 1 has singular
+source-run, patch, counterfactual-checkpoint, replay, endpoint, control, and
+holdout fields, so it cannot bind two independently executed directions.
 
 ## Minimality language
 

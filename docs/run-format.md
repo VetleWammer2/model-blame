@@ -135,6 +135,7 @@ consumed.
 - the original source-file `source_hash` and basename;
 - `examples_parquet_hash`, binding the recorded replay copy;
 - logical example count;
+- the declared reserved-no-op field and donor-row count;
 - duplicate groups keyed by `example_id`.
 
 `dataset/shards.json` records the source basename, hash, and row count for each
@@ -150,6 +151,7 @@ source shard. The built-in version-1 loop writes one source shard.
 | `labels_json` | string | Canonical JSON representation of labels. |
 | `metadata_json` | string | Canonical JSON representation of declared metadata. |
 | `sample_weight` | float64 | Original record weight. |
+| `reserved_noop` | bool | Whether the row is a dormant built-in donor. |
 | `source` | string | Source name. |
 | `source_row` | int64 | Zero-based source row. |
 
@@ -208,12 +210,17 @@ occurrence_id, example_id, global_step, microbatch_index,
 batch_position, packed_sequence_id, token_start, token_end,
 source, source_row, epoch, original_loss_weight,
 prompt_token_mask, completion_token_mask,
-left_truncated_tokens, right_truncated_tokens
+left_truncated_tokens, right_truncated_tokens,
+reserved_noop, injection_loss_weights
 ```
 
 Token intervals are half-open. Masks are local to the occurrence span. Packing,
 padding, and truncation metadata allow one occurrence's supervised contribution
 to be changed without moving unrelated tokens.
+
+A reserved occurrence occupies one complete trailing batch row. Its live weights
+are zero; `injection_loss_weights` records the exact supervised weights that a
+`RESERVED_SLOT_INJECT` patch may restore.
 
 An occurrence identity is:
 

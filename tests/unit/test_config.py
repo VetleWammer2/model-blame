@@ -115,6 +115,20 @@ def test_experiment_rejects_traversal_and_conflicting_fields() -> None:
         )
 
 
+def test_reserved_noop_slots_require_a_declared_dataset_role() -> None:
+    base = {
+        "dataset": {"path": "data/train.jsonl", "reserved_noop_field": "reserved"},
+        "training": {"steps": 2, "batch_size": 2, "reserved_noop_slots": 1},
+        "checkpoints": {"interval": 1},
+    }
+    config = ExperimentConfig.model_validate(base)
+    assert config.training.reserved_noop_slots == 1
+    with pytest.raises(ValidationError, match="declared together"):
+        ExperimentConfig.model_validate(
+            {**base, "training": {"steps": 2, "batch_size": 2}}
+        )
+
+
 def test_behavior_contract_load_hash_and_search_view(tmp_path) -> None:
     path = tmp_path / "behavior.json"
     path.write_text(json.dumps(_behavior_data()), encoding="utf-8")

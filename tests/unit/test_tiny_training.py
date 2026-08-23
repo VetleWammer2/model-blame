@@ -148,6 +148,68 @@ def test_gradient_ablation_preserves_fixed_denominator() -> None:
     assert fixed.loss < renormalized.loss
 
 
+def test_reserved_noop_slot_restores_only_recorded_donor_weights() -> None:
+    dataset = IndexedDataset.from_records(
+        [
+            {"prompt": "donor", "completion": "x", "reserved": True},
+            {"prompt": "active", "completion": "y", "reserved": False},
+        ],
+        reserved_noop_field="reserved",
+    )
+    cursor = TrainingCursor()
+    packed = DeterministicPacker(
+        dataset,
+        ByteTokenizer(),
+        context_length=16,
+        batch_size=2,
+        reserved_noop_slots=1,
+        run_id="mb_reserved",
+        cursor=cursor,
+    ).next_microbatch(global_step=0, microbatch_index=0)
+    active, reserved = packed.sequences
+    assert active.occurrences[0].source_row == 1
+    assert cursor.source_row == 1
+    assert reserved.loss_weights == (0.0,) * 16
+    assert reserved.occurrences[0].reserved_noop
+    assert any(reserved.occurrences[0].injection_loss_weights)
+    event = RecordedBatchEvent.from_packed(
+        packed, hyperparameters={"reserved_noop_slots": 1}
+    )
+
+    from modelblame.adapters.tiny_causal_lm import TinyCausalLMAdapter
+    from modelblame.training.state import build_experiment_state
+
+    state = build_experiment_state(
+        {
+            "model": {
+                "context_length": 16,
+                "hidden_size": 8,
+                "num_layers": 1,
+                "num_heads": 1,
+                "intermediate_size": 16,
+            },
+            "training": {"steps": 1, "batch_size": 2, "reserved_noop_slots": 1},
+            "checkpoints": {"interval": 1},
+        },
+        device=torch.device("cpu"),
+    )
+    batch = TinyCausalLMAdapter().build_batch(state, event)
+    occurrence = reserved.occurrences[0]
+    changed = apply_occurrence_intervention(
+        batch,
+        StepIntervention(inject_occurrence_ids=frozenset({occurrence.occurrence_id})),
+    )
+    assert torch.equal(changed[0], batch.loss_weights[0])
+    assert changed[1, occurrence.token_start : occurrence.token_end].tolist() == list(
+        occurrence.injection_loss_weights
+    )
+    with pytest.raises(ValueError, match="fixed normalization"):
+        StepIntervention(
+            inject_occurrence_ids=frozenset({occurrence.occurrence_id}),
+            normalization="RENORMALIZED",
+        )
+
+
 def test_rng_safe_round_trip(tmp_path: Path) -> None:
     random.seed(33)
     np.random.seed(34)

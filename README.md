@@ -99,8 +99,7 @@ These stay separate:
 | `ATTRIBUTED` | A candidate method ranked the event; no causal claim. |
 | `COUNTERFACTUAL_EFFECT` | An executed patch changed the declared behavior. |
 | `NECESSARY_IN_CONTEXT` | Removing selected gradient contributions from this recorded history met the target and all controls. |
-| `SUFFICIENT_ON_BASELINE` | Adding selected events to a declared clean baseline caused the behavior under that separate procedure. |
-| `BIDIRECTIONAL_CAUSAL_EVIDENCE` | Both recorded removal and controlled baseline addition passed. |
+| `SUFFICIENT_ON_BASELINE` | Adding selected events through declared built-in no-op rows caused the behavior on the recorded clean baseline. |
 | `INCONCLUSIVE` | Replay, statistics, controls, environment, or contract did not justify a stronger result. |
 
 Minimality is orthogonal. `ONE_MINIMAL` means restoring any single member makes
@@ -109,6 +108,9 @@ search budget. `GLOBAL_MINIMUM` is emitted only after exhaustive search over the
 declared subset space. See
 [`docs/causal-semantics.md`](docs/causal-semantics.md) and
 [`TECHNICAL_NOTE.md`](TECHNICAL_NOTE.md).
+
+Version 1 does not expose a bidirectional grade because one certificate cannot
+bind two independent source runs, patches, endpoint pairs, and replay audits.
 
 ## Install
 
@@ -345,10 +347,11 @@ mechanistic claim.
 
 ## Patch semantics
 
-Version 1 supports `GRADIENT_ABLATE` and bounded `REWEIGHT`. The default
-ablation sets the selected supervised token loss weights to zero and leaves
-tokens, shapes, positions, steps, scheduler progression and unrelated
-contributions where they were.
+Version 1 supports `GRADIENT_ABLATE`, bounded `REWEIGHT`, and built-in
+`RESERVED_SLOT_INJECT`. The default ablation sets selected supervised token loss
+weights to zero. Injection restores the exact recorded supervised loss weights
+of a declared trailing no-op row. Both leave tokens, shapes, positions, steps,
+scheduler progression and unrelated contributions where they were.
 
 ```json
 {
@@ -495,8 +498,9 @@ The verified built-in transition loop covers single-process, single-device
 decoder-only prompt/completion SFT; the byte tokenizer; deterministic packing;
 completion-only loss; AdamW; constant, linear or cosine schedules; gradient
 accumulation; JSONL and Parquet; complete SafeTensors checkpoints; and gradient
-ablation with fixed or renormalized denominators. The internal tiny model adds
-device-appropriate fp16/bf16, local Llama-style LoRA, and the strict,
+ablation with fixed or renormalized denominators. It also covers fixed-denominator
+injection into declared trailing no-op rows for the internal tiny model. The tiny
+model adds device-appropriate fp16/bf16, local Llama-style LoRA, and the strict,
 best-effort and off determinism modes.
 
 The recorded Hugging Face path is smaller. One local concrete
@@ -511,8 +515,9 @@ configuration.
 v0.1 does not import `Trainer` histories. It does not support arbitrary Hugging
 Face architectures or tokenizers, arbitrary training loops, DDP/FSDP, tensor or
 pipeline parallelism, multiple nodes, preference or reinforcement training,
-diffusion, vision, multimodal models, general data addition, automatic behavior
-discovery, LLM judges, hosted services, or exact machine-unlearning guarantees.
+diffusion, vision, multimodal models, data addition outside declared built-in
+no-op rows, automatic behavior discovery, LLM judges, hosted services, or exact
+machine-unlearning guarantees.
 Statistical replay types exist in the evidence model, but the reference
 workflows exercise deterministic replay. Full limits in
 [`docs/limitations.md`](docs/limitations.md) and
@@ -547,10 +552,10 @@ and scoped evidence certification. Paper-linked comparison in
 
 Next: matched instrumentation-overhead measurements, larger multi-seed CPU and
 GPU studies, more negative cases, and reviewed expansion beyond the one recorded
-Hugging Face profile. Later versions may add preference-pair interventions and
-clean-baseline injection, then single-node distributed replay, mechanistic
-targets and active counterfactual experiment design. Roadmap items, not current
-support claims.
+Hugging Face profile. Later versions may add preference-pair interventions,
+bidirectional aggregate certificates, single-node distributed replay,
+mechanistic targets and active counterfactual experiment design. Roadmap items,
+not current support claims.
 
 ## Contributing
 

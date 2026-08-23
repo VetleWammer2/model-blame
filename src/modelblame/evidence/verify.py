@@ -20,7 +20,7 @@ from modelblame.behavior.contract import load_contract_artifact
 from modelblame.checkpoint.hashing import canonical_json_hash, hash_tensors
 from modelblame.data.identity import EXAMPLE_ID_PATTERN, OCCURRENCE_ID_PATTERN
 from modelblame.evidence.certificate import EvidenceCertificate
-from modelblame.patch.schema import Patch, parse_patch
+from modelblame.patch.schema import Patch, ReservedSlotInjectOperation, parse_patch
 from modelblame.reducer.minimality import MinimalityGrade
 from modelblame.util.canonical_json import validate_json_tree
 
@@ -536,6 +536,12 @@ def _verify_blame(root: Path, certificate: EvidenceCertificate, patch: Patch) ->
         final.get("target_effect"),
         certificate.effect_sizes.get("absolute"),
     )
+    _same_value("replay grade", final.get("replay_grade"), certificate.replay_grade)
+    _same_value(
+        "causal claim grade",
+        final.get("causal_claim_grade"),
+        certificate.causal_claim_grade.value,
+    )
     _verify_experiments(root, reduction)
 
 
@@ -601,6 +607,29 @@ def _verify_source_run(
         raise VerificationError(
             f"patch does not bind to source run: {error}"
         ) from error
+    injection_ids = {
+        occurrence_id
+        for operation in patch.operations
+        if isinstance(operation, ReservedSlotInjectOperation)
+        for occurrence_id in operation.occurrence_ids
+    }
+    if injection_ids:
+        if (
+            run.manifest.get("adapter_id") != "modelblame.tiny-causal-lm.v1"
+            or int(run.manifest.get("reserved_noop_slots", 0)) <= 0
+        ):
+            raise VerificationError(
+                "reserved-slot injection is not supported by the source run"
+            )
+        reserved_ids = {
+            str(row["occurrence_id"])
+            for row in run.ledger.iter_occurrences()
+            if bool(row.get("reserved_noop", False))
+        }
+        if not injection_ids <= reserved_ids:
+            raise VerificationError(
+                "reserved-slot injection patch targets an active occurrence"
+            )
 
 
 def verify_bundle(

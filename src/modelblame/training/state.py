@@ -25,6 +25,7 @@ from modelblame.checkpoint.cursor import TrainingCursor
 class TrainingConfig:
     steps: int = 10
     batch_size: int = 2
+    reserved_noop_slots: int = 0
     gradient_accumulation: int = 1
     learning_rate: float = 3e-3
     betas: tuple[float, float] = (0.9, 0.999)
@@ -46,6 +47,8 @@ class TrainingConfig:
             raise ValueError(
                 "steps, batch_size, and gradient_accumulation must be positive"
             )
+        if not 0 <= self.reserved_noop_slots < self.batch_size:
+            raise ValueError("reserved_noop_slots must be in [0, batch_size)")
         if self.learning_rate <= 0 or self.eps <= 0 or self.weight_decay < 0:
             raise ValueError("optimizer hyperparameters are invalid")
         if len(self.betas) != 2 or not all(0 <= beta < 1 for beta in self.betas):
@@ -237,6 +240,7 @@ def normalize_training_settings(config: Any) -> TrainingConfig:
     training_config = TrainingConfig(
         steps=int(training_section.get("steps", training_section.get("max_steps", 10))),
         batch_size=int(training_section.get("batch_size", 2)),
+        reserved_noop_slots=int(training_section.get("reserved_noop_slots", 0)),
         gradient_accumulation=int(
             training_section.get(
                 "gradient_accumulation",

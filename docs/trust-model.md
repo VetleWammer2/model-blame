@@ -99,7 +99,8 @@ Path validation reduces traversal risk but cannot eliminate all time-of-check/ti
 
 ## Patch language
 
-A patch is data, not a script. Version 1 accepts only its enumerated operations. For `GRADIENT_ABLATE`, validation requires:
+A patch is data, not a script. Version 1 accepts only its enumerated operations.
+Occurrence-targeting validation requires:
 
 - an exact source run ID and run hash match;
 - the behavior-contract hash expected by the experiment;
@@ -107,6 +108,10 @@ A patch is data, not a script. Version 1 accepts only its enumerated operations.
 - one declared normalization mode;
 - no path, command, module, callable, or expression fields;
 - no conflicting operations over the same occurrence.
+
+`RESERVED_SLOT_INJECT` additionally requires the built-in adapter, a positive
+declared slot count, exact membership in a recorded trailing no-op row, and the
+recorded fixed-denominator injection weights.
 
 Unknown operation names, unknown keys where the schema is closed, excessive nesting, non-finite numbers, invalid reweight values, duplicate conflicts, and unresolved selectors are rejected before a replay process starts. Human-friendly selectors are resolved once to occurrence IDs; replay does not re-evaluate mutable queries such as “all rows from source X.”
 

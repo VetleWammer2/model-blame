@@ -33,11 +33,14 @@ from modelblame.checkpoint.format import (
 from modelblame.checkpoint.hashing import canonical_json_hash, hash_file
 from modelblame.data.indexed import IndexedDataset
 from modelblame.data.ledger import LedgerReader
+from modelblame.evidence.claims import CausalClaim
 from modelblame.patch.schema import (
     GradientAblateOperation,
+    ReservedSlotInjectOperation,
     ReweightOperation,
     parse_patch,
 )
+from modelblame.replay.result import ReplayGrade
 
 MAX_RUN_MANIFEST_BYTES = 16 * 1024 * 1024
 
@@ -98,6 +101,32 @@ def _verify_run_manifest(run_path: Path) -> dict[str, Any]:
         raise ValueError("recorded history manifest hash mismatch")
     if dict(ledger.manifest["hashes"]) != manifest.get("history_table_hashes"):
         raise ValueError("recorded history table hashes differ from run manifest")
+    reserved_slots = manifest.get("reserved_noop_slots", 0)
+    if isinstance(reserved_slots, bool) or not isinstance(reserved_slots, int):
+        raise ValueError("recorded reserved no-op slot count is malformed")
+    reserved_dataset_count = sum(example.reserved_noop for example in dataset)
+    if (
+        reserved_dataset_count != int(dataset_manifest.get("reserved_noop_count", 0))
+        or bool(reserved_slots) != bool(reserved_dataset_count)
+        or bool(reserved_slots) != bool(dataset_manifest.get("reserved_noop_field"))
+    ):
+        raise ValueError("recorded reserved no-op dataset declarations differ")
+    reserved_occurrences = 0
+    for event in ledger.iter_batches():
+        if int(event.hyperparameters.get("reserved_noop_slots", 0)) != reserved_slots:
+            raise ValueError(
+                "recorded batch reserved no-op policy differs from run manifest"
+            )
+        reserved_occurrences += sum(
+            bool(span.get("reserved_noop", False))
+            for spans in event.occurrence_spans
+            for span in spans
+        )
+    expected_reserved = int(manifest["event_counts"]["microbatches"]) * reserved_slots
+    if reserved_occurrences != expected_reserved or reserved_occurrences != int(
+        manifest["event_counts"].get("reserved_noop_occurrences", 0)
+    ):
+        raise ValueError("recorded reserved no-op occurrence count mismatch")
     return manifest
 
 
@@ -134,6 +163,39 @@ def _target_passed(
         and counterfactual_state is BehaviorState.ABSENT
         and effect >= required_effect
     )
+
+
+def _addition_effect(baseline: float, added: float, direction: str) -> float:
+    if direction == "greater_is_present":
+        return added - baseline
+    if direction == "less_is_present":
+        return baseline - added
+    raise ValueError(f"unsupported behavior direction: {direction!r}")
+
+
+def _addition_target_passed(
+    baseline_state: BehaviorState,
+    added_state: BehaviorState,
+    effect: float,
+    required_effect: float,
+) -> bool:
+    """Require actual emergence before certifying an addition intervention."""
+
+    return (
+        baseline_state is BehaviorState.ABSENT
+        and added_state is BehaviorState.PRESENT
+        and effect >= required_effect
+    )
+
+
+def _latest_replay_grade(run_path: Path, run_id: str) -> ReplayGrade:
+    artifacts = sorted((run_path / "audits").glob("*.json"))
+    if not artifacts:
+        return ReplayGrade.UNAUDITED
+    audit = _read_json(artifacts[-1])
+    if audit.get("run_id") != run_id:
+        raise ValueError("latest replay audit belongs to a different run")
+    return ReplayGrade(str(audit.get("replay_grade")))
 
 
 def _control_results(
@@ -209,6 +271,13 @@ def execute_replay(
     occurrence_steps = {
         str(row["occurrence_id"]): int(row["global_step"]) for row in occurrence_rows
     }
+    reserved_occurrence_ids = {
+        str(span["occurrence_id"])
+        for event in ledger.iter_batches()
+        for spans in event.occurrence_spans
+        for span in spans
+        if bool(span.get("reserved_noop", False))
+    }
     patch = parse_patch(
         patch_path,
         expected_run_id=str(manifest["run_id"]),
@@ -222,11 +291,31 @@ def execute_replay(
     normalization = next(iter(normalizations))
     ablated: set[str] = set()
     reweighted: dict[str, float] = {}
+    injected: set[str] = set()
     for operation in patch.operations:
         if isinstance(operation, GradientAblateOperation):
             ablated.update(operation.occurrence_ids)
         elif isinstance(operation, ReweightOperation):
             reweighted.update(operation.occurrence_weights)
+        elif isinstance(operation, ReservedSlotInjectOperation):
+            injected.update(operation.occurrence_ids)
+    addition = bool(injected)
+    if addition:
+        if manifest["adapter_id"] != "modelblame.tiny-causal-lm.v1":
+            raise ValueError(
+                "reserved-slot injection is supported only by the built-in harness"
+            )
+        if int(manifest.get("reserved_noop_slots", 0)) <= 0:
+            raise ValueError("source run declares no reserved no-op slots")
+        nonreserved = sorted(
+            occurrence_id
+            for occurrence_id in injected
+            if occurrence_id not in reserved_occurrence_ids
+        )
+        if nonreserved:
+            raise ValueError(
+                f"occurrence {nonreserved[0]} is not a reserved no-op slot"
+            )
     earliest = min(
         occurrence_steps[occurrence_id] for occurrence_id in patch.occurrence_ids
     )
@@ -239,6 +328,10 @@ def execute_replay(
     if verify_checkpoint(start_checkpoint) != start_ref["hash"]:
         raise ValueError("start checkpoint hash differs from the run manifest")
     state = load_checkpoint(start_checkpoint, device=torch.device(device))
+    if state.training_config.reserved_noop_slots != int(
+        manifest.get("reserved_noop_slots", 0)
+    ):
+        raise ValueError("checkpoint reserved no-op policy differs from source run")
     if state.tokenizer.fingerprint != manifest["tokenizer_fingerprint"]:
         raise ValueError("checkpoint tokenizer fingerprint differs from source run")
     if dict(getattr(state, "environment_compatibility", {})) != manifest.get(
@@ -251,6 +344,7 @@ def execute_replay(
     intervention = StepIntervention(
         ablate_occurrence_ids=frozenset(ablated),
         occurrence_weights=reweighted,
+        inject_occurrence_ids=frozenset(injected),
         normalization=normalization,
     )
     final_step = int(manifest["event_counts"]["training_steps"])
@@ -299,17 +393,30 @@ def execute_replay(
     original_controls = evaluate_controls(original_scorer, behavior)
     counterfactual_controls = evaluate_controls(counterfactual_scorer, behavior)
     controls = _control_results(original_controls, counterfactual_controls, behavior)
-    target_effect = _effect(
-        original_behavior.score,
-        counterfactual_behavior.score,
-        str(behavior["direction"]),
-    )
-    search_passed = _target_passed(
-        original_behavior.state,
-        counterfactual_behavior.state,
-        target_effect,
-        float(behavior["required_effect"]),
-    )
+    if addition:
+        target_effect = _addition_effect(
+            original_behavior.score,
+            counterfactual_behavior.score,
+            str(behavior["direction"]),
+        )
+        search_passed = _addition_target_passed(
+            original_behavior.state,
+            counterfactual_behavior.state,
+            target_effect,
+            float(behavior["required_effect"]),
+        )
+    else:
+        target_effect = _effect(
+            original_behavior.score,
+            counterfactual_behavior.score,
+            str(behavior["direction"]),
+        )
+        search_passed = _target_passed(
+            original_behavior.state,
+            counterfactual_behavior.state,
+            target_effect,
+            float(behavior["required_effect"]),
+        )
     controls_passed = bool(controls) and all(item["passed"] for item in controls)
     holdout: dict[str, Any] = {"status": "SEALED"}
     final_passed = search_passed and controls_passed
@@ -321,17 +428,30 @@ def execute_replay(
             candidate_hash=str(patch.patch_hash),
             original_checkpoint_hash=str(final_source_ref["hash"]),
         )
-        holdout_effect = _effect(
-            paired.original.score,
-            paired.counterfactual.score,
-            str(behavior["direction"]),
-        )
-        holdout_passed = _target_passed(
-            paired.original.state,
-            paired.counterfactual.state,
-            holdout_effect,
-            float(behavior["required_effect"]),
-        )
+        if addition:
+            holdout_effect = _addition_effect(
+                paired.original.score,
+                paired.counterfactual.score,
+                str(behavior["direction"]),
+            )
+            holdout_passed = _addition_target_passed(
+                paired.original.state,
+                paired.counterfactual.state,
+                holdout_effect,
+                float(behavior["required_effect"]),
+            )
+        else:
+            holdout_effect = _effect(
+                paired.original.score,
+                paired.counterfactual.score,
+                str(behavior["direction"]),
+            )
+            holdout_passed = _target_passed(
+                paired.original.state,
+                paired.counterfactual.state,
+                holdout_effect,
+                float(behavior["required_effect"]),
+            )
         holdout = {
             "status": "PASSED" if holdout_passed else "FAILED",
             "effect": holdout_effect,
@@ -350,6 +470,34 @@ def execute_replay(
         status = "INCONCLUSIVE"
     else:
         status = "TARGET_PASSED"
+    replay_grade = _latest_replay_grade(run_path, str(manifest["run_id"]))
+    strong = (
+        final_passed
+        and unseal_holdout
+        and holdout.get("status") == "PASSED"
+        and replay_grade
+        in {ReplayGrade.BITWISE, ReplayGrade.NUMERIC, ReplayGrade.STATISTICAL}
+    )
+    claim = (
+        CausalClaim.SUFFICIENT_ON_BASELINE
+        if strong and addition
+        else CausalClaim.NECESSARY_IN_CONTEXT
+        if strong
+        else CausalClaim.INCONCLUSIVE
+    )
+    intervention_semantics = {
+        "operations": sorted({str(operation.op) for operation in patch.operations}),
+        "normalization": normalization,
+        "selected_occurrences": len(patch.occurrence_ids),
+    }
+    if addition:
+        intervention_semantics.update(
+            {
+                "direction": "ADDITION",
+                "baseline": "RECORDED_CLEAN_BASELINE",
+                "slot_policy": "DECLARED_RESERVED_BATCH_ROWS",
+            }
+        )
     result = {
         "schema_version": 1,
         "status": status,
@@ -358,11 +506,7 @@ def execute_replay(
         "run_hash": manifest["run_hash"],
         "behavior_contract_hash": behavior_hash,
         "patch_hash": patch.patch_hash,
-        "intervention_semantics": {
-            "operations": sorted({str(operation.op) for operation in patch.operations}),
-            "normalization": normalization,
-            "selected_occurrences": len(patch.occurrence_ids),
-        },
+        "intervention_semantics": intervention_semantics,
         "source_checkpoint_hash": start_ref["hash"],
         "counterfactual_checkpoint_hash": checkpoint_manifest.checkpoint_hash,
         "earliest_affected_step": earliest,
@@ -374,8 +518,12 @@ def execute_replay(
         "holdout": holdout,
         "controls": controls,
         "controls_passed": controls_passed,
+        "replay_grade": replay_grade.value,
+        "causal_claim_grade": claim.value,
         "wall_seconds": time.monotonic() - started,
     }
+    if addition:
+        result["baseline_behavior"] = _result_dict(original_behavior)
     (output_path / "result.json").write_text(
         json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )

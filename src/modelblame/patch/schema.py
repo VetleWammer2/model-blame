@@ -1,4 +1,4 @@
-"""Safe version-1 gradient intervention patch schema."""
+"""Safe version-1 training intervention patch schema."""
 
 from __future__ import annotations
 
@@ -32,6 +32,7 @@ class PatchValidationError(ValueError):
 
 class PatchOperationType(StrEnum):
     GRADIENT_ABLATE = "GRADIENT_ABLATE"
+    RESERVED_SLOT_INJECT = "RESERVED_SLOT_INJECT"
     REWEIGHT = "REWEIGHT"
 
 
@@ -87,8 +88,28 @@ class ReweightOperation(StrictPatchModel):
         return value
 
 
+class ReservedSlotInjectOperation(StrictPatchModel):
+    op: Literal[PatchOperationType.RESERVED_SLOT_INJECT] = (
+        PatchOperationType.RESERVED_SLOT_INJECT
+    )
+    occurrence_ids: tuple[OccurrenceId, ...] = Field(
+        min_length=1, max_length=MAX_PATCH_OCCURRENCES
+    )
+    normalization: Literal[LossNormalization.FIXED_DENOMINATOR] = (
+        LossNormalization.FIXED_DENOMINATOR
+    )
+
+    @field_validator("occurrence_ids")
+    @classmethod
+    def _unique_occurrences(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(value) != len(set(value)):
+            raise ValueError("an operation cannot repeat an occurrence ID")
+        return value
+
+
 PatchOperation = Annotated[
-    GradientAblateOperation | ReweightOperation, Field(discriminator="op")
+    GradientAblateOperation | ReservedSlotInjectOperation | ReweightOperation,
+    Field(discriminator="op"),
 ]
 
 
@@ -117,11 +138,21 @@ class Patch(StrictPatchModel):
         normalizations = {operation.normalization for operation in self.operations}
         if len(normalizations) != 1:
             raise ValueError("a patch cannot mix loss-normalization semantics")
+        operation_types = {
+            PatchOperationType(operation.op) for operation in self.operations
+        }
+        if (
+            PatchOperationType.RESERVED_SLOT_INJECT in operation_types
+            and len(operation_types) != 1
+        ):
+            raise ValueError(
+                "reserved-slot injection cannot be mixed with removal operations"
+            )
         for operation in self.operations:
             occurrence_ids = (
-                operation.occurrence_ids
-                if isinstance(operation, GradientAblateOperation)
-                else operation.occurrence_weights.keys()
+                operation.occurrence_weights.keys()
+                if isinstance(operation, ReweightOperation)
+                else operation.occurrence_ids
             )
             for occurrence_id in occurrence_ids:
                 if occurrence_id in claimed:
@@ -143,10 +174,10 @@ class Patch(StrictPatchModel):
 
         selected: list[str] = []
         for operation in self.operations:
-            if isinstance(operation, GradientAblateOperation):
-                selected.extend(operation.occurrence_ids)
-            else:
+            if isinstance(operation, ReweightOperation):
                 selected.extend(operation.occurrence_weights)
+            else:
+                selected.extend(operation.occurrence_ids)
         return tuple(selected)
 
     def computed_hash(self) -> str:

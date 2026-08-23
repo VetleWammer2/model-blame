@@ -151,9 +151,9 @@ For a set (S), the test is a joint intervention. It establishes contextual neces
 
 Injecting selected events into declared no-op slots of a clean baseline caused the behavior to meet its presence/effect criterion while satisfying controls. The claim is limited to that baseline and injection protocol. It is not supported for arbitrary external histories in v0.1.
 
-### `BIDIRECTIONAL_CAUSAL_EVIDENCE`
+### Bidirectional evidence is not a version-1 grade
 
-Both removal from the original run and addition to a declared clean baseline were independently executed and passed. This is stronger triangulation than either direction, but remains local to both recorded procedures and contracts.
+Independent removal and addition results can be considered together, but a version-1 certificate binds only one source run, patch, counterfactual checkpoint, replay grade, endpoint pair, control result, and holdout result. It cannot bind both experiments or map their run-scoped occurrence IDs. The machine schema therefore does not expose `BIDIRECTIONAL_CAUSAL_EVIDENCE`.
 
 ### `INCONCLUSIVE`
 
@@ -267,6 +267,6 @@ Sealing is an experimental-protocol boundary, not cryptographic secrecy. Anyone 
 
 An accepted certificate uses this scoped statement:
 
-> Under the recorded training procedure, environment scope, intervention semantics, and behavioral probes, ablating these occurrences produced the measured counterfactual effect.
+> Under the recorded training procedure, environment scope, intervention semantics, and behavioral probes, executing the declared intervention over these occurrences produced the measured counterfactual effect.
 
 It must not say that the selected rows are the universal or exclusive cause, that the model has forgotten the data, that attribution proves provenance, or that the result is a formal causal proof outside the recorded experiment.

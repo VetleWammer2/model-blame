@@ -130,14 +130,22 @@ class EvidenceCertificate(BaseModel):
                 )
             if self.sealed_holdout_result.get("status") != "PASSED":
                 raise ValueError("strong causal claims require a passed sealed holdout")
-        if self.causal_claim_grade is CausalClaim.BIDIRECTIONAL_CAUSAL_EVIDENCE:
-            directions = self.sealed_holdout_result.get("directions", {})
+        if self.causal_claim_grade is CausalClaim.SUFFICIENT_ON_BASELINE:
+            operations = self.intervention_semantics.get("operations")
             if (
-                directions.get("removal") != "PASSED"
-                or directions.get("addition") != "PASSED"
+                not isinstance(operations, list)
+                or set(operations) != {"RESERVED_SLOT_INJECT"}
+                or self.intervention_semantics.get("direction") != "ADDITION"
+                or self.intervention_semantics.get("baseline")
+                != "RECORDED_CLEAN_BASELINE"
+                or self.intervention_semantics.get("slot_policy")
+                != "DECLARED_RESERVED_BATCH_ROWS"
+                or self.original_behavior_result.state != "ABSENT"
+                or self.counterfactual_behavior_result.state != "PRESENT"
             ):
                 raise ValueError(
-                    "bidirectional evidence requires independently passed directions"
+                    "SUFFICIENT_ON_BASELINE requires recorded clean-baseline "
+                    "reserved-slot addition semantics"
                 )
         if self.minimality_grade is MinimalityGrade.ONE_MINIMAL:
             if not self.one_minimality_tests or any(

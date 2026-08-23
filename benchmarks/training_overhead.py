@@ -44,6 +44,7 @@ def measure_unrecorded(config_path: Path) -> dict[str, float | int | str]:
         labels_fields=tuple(dataset_config.get("labels_fields", ())),
         metadata_fields=tuple(dataset_config.get("metadata_fields", ())),
         sample_weight_field=dataset_config.get("sample_weight_field", "sample_weight"),
+        reserved_noop_field=dataset_config.get("reserved_noop_field"),
     )
     state = build_experiment_state(config, device=torch.device("cpu"))
     packer = DeterministicPacker(
@@ -51,6 +52,7 @@ def measure_unrecorded(config_path: Path) -> dict[str, float | int | str]:
         state.tokenizer,
         context_length=model_config.context_length,
         batch_size=training_config.batch_size,
+        reserved_noop_slots=training_config.reserved_noop_slots,
         run_id="mb_overhead_baseline",
         cursor=state.cursor,
     )
