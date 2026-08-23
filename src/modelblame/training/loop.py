@@ -293,6 +293,7 @@ def train_experiment(
             sample_weight_field=dataset_section.get(
                 "sample_weight_field", "sample_weight"
             ),
+            reserved_noop_field=dataset_section.get("reserved_noop_field"),
         )
         dataset.write_parquet(run_path / "dataset" / "examples.parquet")
         examples_parquet_hash = hash_file(run_path / "dataset" / "examples.parquet")
@@ -306,6 +307,10 @@ def train_experiment(
                 "examples_parquet_hash": examples_parquet_hash,
                 "source_name": dataset_path.name,
                 "example_count": len(dataset),
+                "reserved_noop_count": sum(
+                    example.reserved_noop for example in dataset
+                ),
+                "reserved_noop_field": dataset_section.get("reserved_noop_field"),
                 "duplicate_groups": dataset.duplicate_groups,
             },
         )
@@ -330,6 +335,7 @@ def train_experiment(
             state.tokenizer,
             context_length=model_config.context_length,
             batch_size=training_config.batch_size,
+            reserved_noop_slots=training_config.reserved_noop_slots,
             run_id=run_id,
             cursor=state.cursor,
         )
@@ -337,6 +343,7 @@ def train_experiment(
         save_checkpoint(state, run_path / "checkpoints" / "step-000000")
         checkpoint_seconds += time.perf_counter() - checkpoint_started
         occurrence_count = 0
+        reserved_noop_occurrence_count = 0
         with LedgerWriter(run_path / "history") as ledger:
             for global_step in range(training_config.steps):
                 packing_started = time.perf_counter()
@@ -352,6 +359,7 @@ def train_experiment(
                     "precision": training_config.precision,
                     "gradient_accumulation": training_config.gradient_accumulation,
                     "loss_normalization": "FIXED_DENOMINATOR",
+                    "reserved_noop_slots": training_config.reserved_noop_slots,
                 }
                 events = [
                     RecordedBatchEvent.from_packed(
@@ -371,6 +379,11 @@ def train_experiment(
                     ledger.append_batch(event)
                     occurrence_count += sum(
                         len(spans) for spans in event.occurrence_spans
+                    )
+                    reserved_noop_occurrence_count += sum(
+                        bool(span.get("reserved_noop", False))
+                        for spans in event.occurrence_spans
+                        for span in spans
                     )
                 mean_loss = sum(result.loss for result in results) / len(results)
                 current_lr = float(state.optimizer.param_groups[0]["lr"])
@@ -457,6 +470,7 @@ def train_experiment(
             "precision": training_config.precision,
             "training_device": str(torch_device),
             "gradient_accumulation": training_config.gradient_accumulation,
+            "reserved_noop_slots": training_config.reserved_noop_slots,
             "tokenizer_fingerprint": state.tokenizer.fingerprint,
             "dataset_fingerprint": dataset.fingerprint,
             "dataset_index_hash": examples_parquet_hash,
@@ -476,6 +490,7 @@ def train_experiment(
                 "microbatches": training_config.steps
                 * training_config.gradient_accumulation,
                 "example_occurrences": occurrence_count,
+                "reserved_noop_occurrences": reserved_noop_occurrence_count,
             },
             "performance": {
                 "scope": "single recorded train_experiment call",

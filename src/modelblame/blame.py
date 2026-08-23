@@ -27,7 +27,11 @@ from modelblame.evidence.bundle import write_evidence_bundle
 from modelblame.evidence.certificate import EvidenceCertificate
 from modelblame.evidence.claims import CausalClaim
 from modelblame.evidence.verify import sha256_file
-from modelblame.patch.schema import GradientAblateOperation, Patch
+from modelblame.patch.schema import (
+    GradientAblateOperation,
+    Patch,
+    ReservedSlotInjectOperation,
+)
 from modelblame.recorded import RecordedRun
 from modelblame.reducer.engine import CausalReducer, ReplayObservation
 from modelblame.replay.cache import ReplayCache, ReplayCacheKey
@@ -178,6 +182,7 @@ def run_blame(
     ),
     device: str = "cpu",
     include_example_text: bool = False,
+    direction: str = "removal",
 ) -> tuple[Path, dict[str, Any]]:
     """Run real causal reduction; attribution scores only propose candidates."""
 
@@ -185,6 +190,8 @@ def run_blame(
         raise ValueError("candidate_limit must be in [1, 1000000]")
     if not 1 <= workers <= 64:
         raise ValueError("workers must be in [1, 64]")
+    if direction not in {"removal", "addition"}:
+        raise ValueError("direction must be removal or addition")
     run = RecordedRun.open(run_path, verify_checkpoints=True)
     replay_grade = run.replay_grade
     if replay_grade in {ReplayGrade.FAILED, ReplayGrade.UNAUDITED}:
@@ -200,13 +207,31 @@ def run_blame(
     fused = reciprocal_rank_fusion(
         {method: index.scores for method, index in indexes.items()}
     )
-    candidate_ids = [item[0] for item in fused[:candidate_limit]]
-    if not candidate_ids:
-        raise ValueError("candidate attribution returned no occurrences")
+    occurrence_rows = list(run.ledger.iter_occurrences())
     occurrence_steps = {
-        str(row["occurrence_id"]): int(row["global_step"])
-        for row in run.ledger.iter_occurrences()
+        str(row["occurrence_id"]): int(row["global_step"]) for row in occurrence_rows
     }
+    reserved_ids = {
+        str(row["occurrence_id"])
+        for row in occurrence_rows
+        if bool(row.get("reserved_noop", False))
+    }
+    eligible_ids = (
+        reserved_ids
+        if direction == "addition"
+        else set(occurrence_steps) - reserved_ids
+    )
+    candidate_ids = [
+        occurrence_id
+        for occurrence_id, _score, _ranks in fused
+        if occurrence_id in eligible_ids
+    ][:candidate_limit]
+    if not candidate_ids:
+        if direction == "addition":
+            raise ValueError(
+                "source run has no attributable reserved no-op occurrences"
+            )
+        raise ValueError("candidate attribution returned no active occurrences")
     destination = Path(output).resolve()
     if destination.exists():
         raise FileExistsError(f"refusing to overwrite evidence output: {destination}")
@@ -222,6 +247,7 @@ def run_blame(
             "optimizer": run.manifest["optimizer_config"],
             "scheduler": run.manifest["scheduler_config"],
             "gradient_accumulation": run.manifest["gradient_accumulation"],
+            "reserved_noop_slots": run.manifest.get("reserved_noop_slots", 0),
         }
     )
     environment_class = canonical_json_hash(
@@ -233,11 +259,16 @@ def run_blame(
     )
 
     def replay(subset: frozenset[str]) -> ReplayObservation:
+        operation = (
+            ReservedSlotInjectOperation(occurrence_ids=tuple(sorted(subset)))
+            if direction == "addition"
+            else GradientAblateOperation(occurrence_ids=tuple(sorted(subset)))
+        )
         patch = Patch.create(
             run_id=run.run_id,
             run_hash=run.run_hash,
             behavior_contract_hash=contract_hash,
-            operations=[GradientAblateOperation(occurrence_ids=tuple(sorted(subset)))],
+            operations=[operation],
         )
         experiment = work / "experiments" / str(patch.patch_hash)
         patch_path = experiment / "patch.json"
@@ -263,7 +294,7 @@ def run_blame(
         )
         return ReplayObservation(
             accepted=bool(result.get("accepted", False)),
-            target_effect=float(result.get("target_effect", float("-inf"))),
+            target_effect=float(result.get("target_effect", 0.0)),
             controls_passed=bool(result.get("controls_passed", False)),
             status=str(result.get("status", "INCONCLUSIVE")),
             experiment_hash=canonical_json_hash(
@@ -290,11 +321,16 @@ def run_blame(
         )
         shutil.rmtree(work)
         return destination, summary
+    final_operation = (
+        ReservedSlotInjectOperation(occurrence_ids=tuple(reduction.selected))
+        if direction == "addition"
+        else GradientAblateOperation(occurrence_ids=tuple(reduction.selected))
+    )
     final_patch = Patch.create(
         run_id=run.run_id,
         run_hash=run.run_hash,
         behavior_contract_hash=contract_hash,
-        operations=[GradientAblateOperation(occurrence_ids=tuple(reduction.selected))],
+        operations=[final_operation],
     )
     final_patch_path = work / "final-patch.json"
     _write_patch(final_patch_path, final_patch)
@@ -314,6 +350,8 @@ def run_blame(
         "controls",
         "counterfactual_checkpoint_hash",
         "intervention_semantics",
+        "replay_grade",
+        "causal_claim_grade",
     }
     missing_final_fields = sorted(required_final_fields - final_result.keys())
     if missing_final_fields:
@@ -335,7 +373,19 @@ def run_blame(
     holdout = final_result["holdout"]
     controls = final_result["controls"]
     strong = bool(final_result.get("accepted")) and holdout.get("status") == "PASSED"
-    claim = CausalClaim.NECESSARY_IN_CONTEXT if strong else CausalClaim.INCONCLUSIVE
+    expected_claim = (
+        CausalClaim.SUFFICIENT_ON_BASELINE
+        if strong and direction == "addition"
+        else CausalClaim.NECESSARY_IN_CONTEXT
+        if strong
+        else CausalClaim.INCONCLUSIVE
+    )
+    claim = CausalClaim(str(final_result["causal_claim_grade"]))
+    if (
+        claim is not expected_claim
+        or final_result["replay_grade"] != replay_grade.value
+    ):
+        raise ValueError("final replay returned an inconsistent evidence grade")
     candidate_rows = [
         score.to_dict()
         for method in sorted(indexes)
@@ -360,6 +410,7 @@ def run_blame(
         "run_id": run.run_id,
         "behavior_contract_hash": contract_hash,
         "candidate_methods": list(methods),
+        "direction": direction,
         "candidate_limit": candidate_limit,
         "retrieved_candidates": len(candidate_ids),
         "training_text_included": include_example_text,
@@ -426,9 +477,14 @@ def run_blame(
     if include_example_text:
         artifacts["candidate-example-text.parquet"] = candidate_text_table
     generated_hashes = {key: _artifact_hash(value) for key, value in artifacts.items()}
+    interval_left, interval_right = (
+        (counterfactual["prompt_scores"], original["prompt_scores"])
+        if (direction == "addition") == (contract["direction"] == "greater_is_present")
+        else (original["prompt_scores"], counterfactual["prompt_scores"])
+    )
     interval = paired_bootstrap_interval(
-        original["prompt_scores"],
-        counterfactual["prompt_scores"],
+        interval_left,
+        interval_right,
         confidence_level=float(contract["statistics"]["confidence_level"]),
         samples=int(contract["statistics"]["bootstrap_samples"]),
         seed=int(contract["statistics"]["bootstrap_seed"]),
@@ -502,7 +558,7 @@ def run_blame(
             "unsupported_assumptions": [
                 "causal claim is scoped to the recorded trajectory and "
                 "intervention semantics",
-                "no claim of machine unlearning or universal necessity is made",
+                "no claim of machine unlearning or universal causality is made",
             ],
             "warnings": (
                 ["GPU was not tested", "reducer scheduled replays sequentially"]

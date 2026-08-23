@@ -51,6 +51,7 @@ class DatasetConfig(StrictConfigModel):
     labels_fields: tuple[Identifier, ...] = ()
     metadata_fields: tuple[Identifier, ...] = ()
     sample_weight_field: Identifier | None = "sample_weight"
+    reserved_noop_field: Identifier | None = None
 
     @field_validator("path")
     @classmethod
@@ -72,6 +73,8 @@ class DatasetConfig(StrictConfigModel):
         reserved = {self.prompt_field, self.completion_field}
         if self.sample_weight_field is not None:
             reserved.add(self.sample_weight_field)
+        if self.reserved_noop_field is not None:
+            reserved.add(self.reserved_noop_field)
         overlap = (set(self.labels_fields) & set(self.metadata_fields)) | (
             reserved & (set(self.labels_fields) | set(self.metadata_fields))
         )
@@ -225,6 +228,7 @@ class PrecisionMode(StrEnum):
 class TrainingConfig(StrictConfigModel):
     steps: PositiveInt = Field(le=1_000_000_000)
     batch_size: PositiveInt = Field(default=1, le=1_000_000)
+    reserved_noop_slots: int = Field(default=0, ge=0, le=1_000_000)
     gradient_accumulation: PositiveInt = Field(
         default=1,
         le=1_000_000,
@@ -290,6 +294,17 @@ class ExperimentConfig(StrictConfigModel):
             raise ValueError("scheduler.warmup_steps cannot exceed training.steps")
         if self.checkpoints.interval > self.training.steps:
             raise ValueError("checkpoints.interval cannot exceed training.steps")
+        if self.training.reserved_noop_slots >= self.training.batch_size:
+            raise ValueError(
+                "training.reserved_noop_slots must be smaller than batch_size"
+            )
+        if bool(self.training.reserved_noop_slots) != bool(
+            self.dataset.reserved_noop_field
+        ):
+            raise ValueError(
+                "dataset.reserved_noop_field and training.reserved_noop_slots "
+                "must be declared together"
+            )
         if (
             self.training.precision is PrecisionMode.FP16
             and self.effective_device == "cpu"
@@ -308,6 +323,10 @@ class ExperimentConfig(StrictConfigModel):
                 "and Hugging Face models require that adapter"
             )
         if is_huggingface_adapter:
+            if self.training.reserved_noop_slots:
+                raise ValueError(
+                    "reserved no-op slots are supported only by the built-in harness"
+                )
             if self.model.vocab_size != 260:
                 raise ValueError(
                     "the recorded Hugging Face v1 profile requires vocab_size=260"

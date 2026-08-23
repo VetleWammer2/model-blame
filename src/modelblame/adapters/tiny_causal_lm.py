@@ -557,7 +557,16 @@ class TinyCausalLMAdapter:
 
         data = config if isinstance(config, Mapping) else config.model_dump()
         section = data.get("data", data.get("dataset", data))
-        return IndexedDataset.from_path(Path(section["path"]))
+        return IndexedDataset.from_path(
+            Path(section["path"]),
+            source=str(section.get("source", Path(section["path"]).name)),
+            prompt_field=str(section.get("prompt_field", "prompt")),
+            completion_field=str(section.get("completion_field", "completion")),
+            labels_fields=tuple(section.get("labels_fields", ())),
+            metadata_fields=tuple(section.get("metadata_fields", ())),
+            sample_weight_field=section.get("sample_weight_field", "sample_weight"),
+            reserved_noop_field=section.get("reserved_noop_field"),
+        )
 
     def build_batch(self, state: Any, event: Any) -> TrainingBatch:
         device = next(state.model.parameters()).device
@@ -627,7 +636,9 @@ class TinyCausalLMAdapter:
                 scaled_loss.backward()
             else:
                 state.scaler.scale(scaled_loss).backward()
-            occurrence_loss, occurrence_count = per_occurrence_losses(logits, batch)
+            occurrence_loss, occurrence_count = per_occurrence_losses(
+                logits, batch, weights
+            )
             output_hash = hashlib.sha256(
                 logits.detach().cpu().contiguous().view(torch.uint8).numpy().tobytes()
             ).hexdigest()

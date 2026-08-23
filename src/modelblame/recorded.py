@@ -66,6 +66,11 @@ class RecordedRun:
         indexed = IndexedDataset.from_index_parquet(examples_path)
         if indexed.semantic_fingerprint != dataset_manifest.get("semantic_fingerprint"):
             raise ValueError("recorded dataset semantic fingerprint mismatch")
+        reserved_dataset_count = sum(example.reserved_noop for example in indexed)
+        if reserved_dataset_count != int(
+            dataset_manifest.get("reserved_noop_count", 0)
+        ):
+            raise ValueError("recorded reserved no-op dataset count mismatch")
         computed_dataset_fingerprint = canonical_json_hash(
             {
                 "schema_version": 1,
@@ -75,6 +80,32 @@ class RecordedRun:
         )
         if computed_dataset_fingerprint != dataset_manifest.get("fingerprint"):
             raise ValueError("recorded dataset fingerprint is internally inconsistent")
+        reserved_slots = manifest.get("reserved_noop_slots", 0)
+        if isinstance(reserved_slots, bool) or not isinstance(reserved_slots, int):
+            raise ValueError("recorded reserved no-op slot count is malformed")
+        if bool(reserved_slots) != bool(reserved_dataset_count) or bool(
+            reserved_slots
+        ) != bool(dataset_manifest.get("reserved_noop_field")):
+            raise ValueError("recorded reserved no-op declarations are inconsistent")
+        reserved_occurrences = 0
+        for event in ledger.iter_batches():
+            event_slots = int(event.hyperparameters.get("reserved_noop_slots", 0))
+            if event_slots != reserved_slots:
+                raise ValueError(
+                    "recorded batch reserved no-op policy differs from run manifest"
+                )
+            reserved_occurrences += sum(
+                bool(span.get("reserved_noop", False))
+                for spans in event.occurrence_spans
+                for span in spans
+            )
+        expected_reserved = (
+            int(manifest["event_counts"]["microbatches"]) * reserved_slots
+        )
+        if reserved_occurrences != expected_reserved or reserved_occurrences != int(
+            manifest["event_counts"].get("reserved_noop_occurrences", 0)
+        ):
+            raise ValueError("recorded reserved no-op occurrence count mismatch")
         environment = _object_json(root / "environment.json")
         if canonical_json_hash(environment) != manifest.get("environment_identity"):
             raise ValueError("recorded environment identity hash mismatch")
@@ -174,6 +205,10 @@ class RecordedRun:
             "tokenizer_fingerprint": self.manifest["tokenizer_fingerprint"],
             "training_steps": expected_steps,
             "example_occurrences": self.manifest["event_counts"]["example_occurrences"],
+            "reserved_noop_occurrences": self.manifest["event_counts"].get(
+                "reserved_noop_occurrences", 0
+            ),
+            "reserved_noop_slots": self.manifest.get("reserved_noop_slots", 0),
             "checkpoint_count": len(checkpoints),
             "checkpoint_coverage_complete": covered,
             "determinism": self.manifest["determinism"],
@@ -186,6 +221,15 @@ class RecordedRun:
                 "tracin-cp",
                 "trajectory-sketch",
             ],
-            "supported_interventions": ["GRADIENT_ABLATE", "REWEIGHT"],
+            "supported_interventions": [
+                "GRADIENT_ABLATE",
+                *(
+                    ["RESERVED_SLOT_INJECT"]
+                    if self.manifest["adapter_id"] == "modelblame.tiny-causal-lm.v1"
+                    and self.manifest.get("reserved_noop_slots", 0)
+                    else []
+                ),
+                "REWEIGHT",
+            ],
             "supported_normalizations": ["FIXED_DENOMINATOR", "RENORMALIZED"],
         }

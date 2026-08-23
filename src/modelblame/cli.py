@@ -204,6 +204,12 @@ def _verify_reexecution(certificate: Any, result: Mapping[str, Any]) -> None:
     for key, expected in identities.items():
         if result.get(key) != expected:
             raise ValueError(f"re-executed {key} does not match certificate")
+    if result.get("replay_grade") != certificate.replay_grade:
+        raise ValueError("re-executed replay grade does not match certificate")
+    if result.get("causal_claim_grade") != certificate.causal_claim_grade.value:
+        raise ValueError("re-executed causal claim does not match certificate")
+    if result.get("intervention_semantics") != certificate.intervention_semantics:
+        raise ValueError("re-executed intervention semantics do not match certificate")
     _verify_score_result(
         "original behavior",
         certificate.original_behavior_result.model_dump(mode="json"),
@@ -667,6 +673,13 @@ def blame_command(
             ),
         ),
     ] = False,
+    direction: Annotated[
+        str,
+        typer.Option(
+            "--direction",
+            help="removal from active rows or addition through reserved no-op rows.",
+        ),
+    ] = "removal",
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     """Propose candidates, execute interventions, and reduce a causal set."""
@@ -685,6 +698,7 @@ def blame_command(
             methods=_method_list(methods),
             device=device,
             include_example_text=include_example_text,
+            direction=direction,
         )
     except Exception as error:
         _die(error)

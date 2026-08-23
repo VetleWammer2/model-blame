@@ -194,6 +194,8 @@ def _build_bundle(tmp_path: Path) -> tuple[Path, str, str]:
         "original_behavior": original,
         "counterfactual_behavior": counterfactual,
         "target_effect": 2.0,
+        "replay_grade": "BITWISE",
+        "causal_claim_grade": "NECESSARY_IN_CONTEXT",
         "holdout": {"status": "PASSED"},
         "controls": [control],
     }
@@ -325,6 +327,30 @@ def test_complete_bundle_verifies(tmp_path: Path) -> None:
     root, _, _ = _build_bundle(tmp_path)
     certificate = verify_bundle(root)
     assert certificate.causal_claim_grade.value == "NECESSARY_IN_CONTEXT"
+
+
+def test_removal_bundle_cannot_claim_sufficiency(tmp_path: Path) -> None:
+    root, _, _ = _build_bundle(tmp_path)
+    certificate = _json(root / "certificate.json")
+    certificate["causal_claim_grade"] = "SUFFICIENT_ON_BASELINE"
+    _write_json(root / "certificate.json", certificate)
+    _reauthenticate(root)
+    with pytest.raises(VerificationError, match="evidence certificate"):
+        verify_bundle(root)
+
+
+def test_bidirectional_grade_is_not_in_the_version_one_schema(tmp_path: Path) -> None:
+    root, _, _ = _build_bundle(tmp_path)
+    certificate = _json(root / "certificate.json")
+    certificate["causal_claim_grade"] = "BIDIRECTIONAL_CAUSAL_EVIDENCE"
+    certificate["sealed_holdout_result"]["directions"] = {
+        "addition": "PASSED",
+        "removal": "PASSED",
+    }
+    _write_json(root / "certificate.json", certificate)
+    _reauthenticate(root)
+    with pytest.raises(VerificationError, match="evidence certificate"):
+        verify_bundle(root)
 
 
 def test_example_text_artifact_requires_explicit_certificate_opt_in(

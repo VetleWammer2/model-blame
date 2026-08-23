@@ -52,16 +52,20 @@ class IndexedExample:
     sample_weight: float
     source: str
     source_row: int
+    reserved_noop: bool = False
 
     @property
     def logical_record(self) -> dict[str, Any]:
-        return {
+        value = {
             "prompt": self.prompt,
             "completion": self.completion,
             "labels": self.labels,
             "metadata": dict(self.metadata),
             "sample_weight": self.sample_weight,
         }
+        if self.reserved_noop:
+            value["reserved_noop"] = True
+        return value
 
 
 class IndexedDataset(Sequence[IndexedExample]):
@@ -142,6 +146,7 @@ class IndexedDataset(Sequence[IndexedExample]):
         labels_fields: tuple[str, ...] | None = None,
         metadata_fields: tuple[str, ...] | None = None,
         sample_weight_field: str | None = "sample_weight",
+        reserved_noop_field: str | None = None,
     ) -> IndexedDataset:
         examples: list[IndexedExample] = []
         for row_index, record in enumerate(records):
@@ -174,12 +179,21 @@ class IndexedDataset(Sequence[IndexedExample]):
             )
             if not math.isfinite(weight):
                 raise ValueError(f"record {row_index} sample weight must be finite")
+            reserved_noop = False
+            if reserved_noop_field is not None:
+                raw_reserved = record.get(reserved_noop_field, False)
+                if not isinstance(raw_reserved, bool):
+                    raise ValueError(
+                        f"record {row_index} reserved no-op flag must be boolean"
+                    )
+                reserved_noop = raw_reserved
             logical_record = {
                 "prompt": prompt,
                 "completion": completion,
                 "labels": labels,
                 "metadata": dict(metadata),
                 "sample_weight": weight,
+                "reserved_noop": reserved_noop,
             }
             examples.append(
                 IndexedExample(
@@ -191,6 +205,7 @@ class IndexedDataset(Sequence[IndexedExample]):
                     sample_weight=weight,
                     source=source,
                     source_row=row_index,
+                    reserved_noop=reserved_noop,
                 )
             )
         return cls(examples)
@@ -207,6 +222,7 @@ class IndexedDataset(Sequence[IndexedExample]):
         labels_fields: tuple[str, ...] | None = None,
         metadata_fields: tuple[str, ...] | None = None,
         sample_weight_field: str | None = "sample_weight",
+        reserved_noop_field: str | None = None,
     ) -> IndexedDataset:
         source_path = path.resolve(strict=True)
         size = source_path.stat().st_size
@@ -237,6 +253,7 @@ class IndexedDataset(Sequence[IndexedExample]):
             labels_fields=labels_fields,
             metadata_fields=metadata_fields,
             sample_weight_field=sample_weight_field,
+            reserved_noop_field=reserved_noop_field,
         )
         return cls(indexed, source_path=source_path, source_hash=source_hash)
 
@@ -259,6 +276,7 @@ class IndexedDataset(Sequence[IndexedExample]):
                     separators=(",", ":"),
                 ),
                 "sample_weight": example.sample_weight,
+                "reserved_noop": example.reserved_noop,
                 "source": example.source,
                 "source_row": example.source_row,
             }
@@ -272,6 +290,7 @@ class IndexedDataset(Sequence[IndexedExample]):
                 ("labels_json", pa.string()),
                 ("metadata_json", pa.string()),
                 ("sample_weight", pa.float64()),
+                ("reserved_noop", pa.bool_()),
                 ("source", pa.string()),
                 ("source_row", pa.int64()),
             ]
@@ -292,6 +311,7 @@ class IndexedDataset(Sequence[IndexedExample]):
                 "labels": json.loads(row["labels_json"]),
                 "metadata": json.loads(row["metadata_json"]),
                 "sample_weight": float(row["sample_weight"]),
+                "reserved_noop": bool(row.get("reserved_noop", False)),
             }
             if _example_id(logical) != row["example_id"]:
                 raise ValueError("indexed dataset example hash mismatch")
@@ -305,6 +325,7 @@ class IndexedDataset(Sequence[IndexedExample]):
                     sample_weight=logical["sample_weight"],
                     source=row["source"],
                     source_row=int(row["source_row"]),
+                    reserved_noop=logical["reserved_noop"],
                 )
             )
         return cls(examples)

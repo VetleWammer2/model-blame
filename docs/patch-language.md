@@ -4,9 +4,10 @@ A ModelBlame patch is a small, versioned JSON document that changes recorded
 loss contributions during replay. It contains resolved occurrence IDs only. It
 does not contain selectors, file paths, source text, Python, or commands.
 
-Version 1 supports `GRADIENT_ABLATE` and `REWEIGHT`. Gradient ablation is the
-required causal intervention. It is not dataset deletion and it is not a claim
-of machine unlearning.
+Version 1 supports `GRADIENT_ABLATE`, `REWEIGHT`, and
+`RESERVED_SLOT_INJECT`. Gradient ablation is not dataset deletion, and reserved
+injection is not arbitrary dataset insertion. Neither is a claim of machine
+unlearning.
 
 ## Schema
 
@@ -91,6 +92,28 @@ weights. Values must be finite and in `[0, 1000]`. A zero multiplier has the sam
 local numerator effect as ablation, although retaining a distinct operation
 makes the requested semantics explicit.
 
+## `RESERVED_SLOT_INJECT`
+
+```json
+{
+  "op": "RESERVED_SLOT_INJECT",
+  "occurrence_ids": ["occ_<64 lowercase hex characters>"],
+  "normalization": "FIXED_DENOMINATOR"
+}
+```
+
+The built-in harness may declare trailing batch rows as reserved no-ops. Each
+row contains one donor example's recorded tokens and attention mask, but its
+live loss weights are zero in the source run. Injection restores exactly the
+recorded supervised loss weights for selected donor occurrences. The donor row
+is isolated from active packed rows, and both branches execute the same shapes,
+ordering, steps, scheduler progression, and RNG-consuming forward path.
+
+Injection is valid only for reserved occurrences in a built-in run that declared
+reserved slots. It uses `FIXED_DENOMINATOR`; the denominator remains the source
+microbatch's positive active-only denominator. Injection operations cannot be
+mixed with ablation or reweighting in one patch.
+
 One occurrence may appear in at most one operation. Combining ablation and
 reweighting for the same ID is rejected rather than resolved by order.
 
@@ -133,6 +156,8 @@ Changing it changes the patch hash and invalidates the prior causal result.
 - a mismatched expected run ID, run hash, or behavior-contract hash;
 - oversized or excessively nested input;
 - non-numeric, negative, or out-of-range reweight values.
+- injection of an active occurrence or injection into a run without declared
+  built-in no-op rows.
 
 Before replay, callers supply the source run's known occurrence-ID collection.
 This turns a syntactically valid patch into a context-validated intervention.

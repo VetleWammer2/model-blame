@@ -21,6 +21,7 @@ class StepIntervention:
 
     ablate_occurrence_ids: frozenset[str] = frozenset()
     occurrence_weights: Mapping[str, float] = field(default_factory=dict)
+    inject_occurrence_ids: frozenset[str] = frozenset()
     normalization: str = "FIXED_DENOMINATOR"
 
     def __post_init__(self) -> None:
@@ -36,6 +37,14 @@ class StepIntervention:
                 raise ValueError(
                     "occurrence weights must be finite values in [0, 1000]"
                 )
+        conflicts = (set(self.ablate_occurrence_ids) & set(self.occurrence_weights)) | (
+            set(self.inject_occurrence_ids)
+            & (set(self.ablate_occurrence_ids) | set(self.occurrence_weights))
+        )
+        if conflicts:
+            raise ValueError(f"conflicting intervention for {sorted(conflicts)[0]}")
+        if self.inject_occurrence_ids and self.normalization != "FIXED_DENOMINATOR":
+            raise ValueError("reserved-slot injection requires fixed normalization")
 
 
 @dataclass(slots=True)

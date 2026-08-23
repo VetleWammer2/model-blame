@@ -19,7 +19,9 @@ The intended audited path is deliberately narrow:
 - full-parameter training for small models and controlled LoRA training for larger local models;
 - AdamW, deterministic packing, gradient accumulation, and periodic complete checkpoints;
 - JSONL and Parquet input whose training-relevant fields fit the experiment schema;
-- `GRADIENT_ABLATE` with `FIXED_DENOMINATOR` or `RENORMALIZED` semantics.
+- `GRADIENT_ABLATE` with `FIXED_DENOMINATOR` or `RENORMALIZED` semantics;
+- for the built-in small-transformer harness only, declared trailing no-op rows
+  and `RESERVED_SLOT_INJECT` with `FIXED_DENOMINATOR` semantics.
 
 Support is conditional on an adapter being able to reconstruct exact recorded batches, serialize every required state component safely, and evaluate the declared scorer. A model architecture being loadable by a third-party library does not by itself make its training loop replayable by ModelBlame. The Hugging Face profile is supported because ModelBlame owns the recording and the transition. It is not a claim that an external Hugging Face history can be imported.
 
@@ -46,12 +48,25 @@ DPO, PPO, GRPO, diffusion, vision, multimodal training; preference-pair
 interventions. It does not rewrite user training code to capture missing
 provenance.
 
-Clean-baseline addition and reserved no-op-slot injection are not implemented by
-the v0.1 replay engine. They are a declared extension point for controlled
-harnesses. General insertion into an arbitrary external training history is
+The built-in harness implements clean-baseline addition through declared
+reserved batch rows. Donor examples are tokenized into trailing, isolated rows
+during the source run, but their live loss weights are zero. Replay may restore
+only their recorded supervised loss weights. This preserves tokens, masks,
+batch shape, ordering, optimizer-step count, scheduler progression, and RNG
+consumption between the baseline and addition branch.
+
+General insertion into an arbitrary external training history remains
 unsupported because it can change packing, sampling, optimizer-step count,
 scheduler state, and RNG consumption in ways that no longer correspond to a
-well-defined local patch.
+well-defined local patch. The recorded Hugging Face profile does not support
+reserved slots.
+
+Version 1 can certify removal and clean-baseline addition separately. It cannot
+certify their conjunction: a certificate binds one source run, patch,
+counterfactual checkpoint, replay grade, endpoint pair, control result, and
+holdout result. `BIDIRECTIONAL_CAUSAL_EVIDENCE` is therefore not a version-1
+certificate grade. A future aggregate format would need to bind both complete
+experiments and their cross-run occurrence mapping.
 
 ## A recorded run is a prerequisite
 
@@ -66,6 +81,12 @@ A `BITWISE` grade covers only the audited interval in the recorded compatibility
 ## Intervention semantics are not physical deletion
 
 Gradient ablation preserves a recorded packed layout and zeros selected supervised loss contributions. Tokens from an ablated occurrence may still be present as context for other supervised tokens in the packed sequence, depending on the model's causal attention and masking. The operation does not reproduce every consequence of removing the row before tokenization, sampling, or packing.
+
+Reserved-slot injection activates a donor row that was already present with
+zero live loss weight in the recorded clean baseline. Its fixed denominator is
+the original positive denominator from active rows; donor weights do not add
+denominator mass. This is a declared loss intervention, not arbitrary dataset
+insertion or retraining from a physically enlarged dataset.
 
 `FIXED_DENOMINATOR` preserves the original scale but differs from many conventional mean-loss definitions after deletion. `RENORMALIZED` changes the remaining gradient scale and can affect every later AdamW update. Neither should be described simply as “deleting the data.”
 

@@ -81,6 +81,7 @@ class RecordedBatchEvent:
         ):
             raise ValueError("recorded batch fields have different batch dimensions")
         seen: set[str] = set()
+        reserved_positions: set[int] = set()
         denominator = 0.0
         for position, token_ids in enumerate(self.input_ids):
             if not 1 < len(token_ids) <= MAX_SEQUENCE_LENGTH:
@@ -143,6 +144,68 @@ class RecordedBatchEvent:
                     )
                 ):
                     raise ValueError("prompt and completion masks overlap")
+                reserved_noop = span.get("reserved_noop", False)
+                injection_weights = span.get("injection_loss_weights", ())
+                if not isinstance(reserved_noop, bool) or not isinstance(
+                    injection_weights, list | tuple
+                ):
+                    raise ValueError("reserved no-op metadata is malformed")
+                if reserved_noop:
+                    reserved_positions.add(position)
+                    if (
+                        len(self.occurrence_spans[position]) != 1
+                        or start != 0
+                        or end != nonpadding
+                        or not self.packed_sequence_ids[position].startswith("noop_")
+                    ):
+                        raise ValueError(
+                            "a reserved no-op must occupy one complete packed sequence"
+                        )
+                    original_weight = float(span.get("original_loss_weight", -1.0))
+                    expected_injection_weights = [
+                        original_weight if bool(selected) else 0.0
+                        for selected in span["completion_token_mask"]
+                    ]
+                    if (
+                        not math.isfinite(original_weight)
+                        or not 0 <= original_weight <= 1_000
+                        or len(injection_weights) != span_length
+                        or any(
+                            not math.isfinite(float(value)) or float(value) < 0
+                            for value in injection_weights
+                        )
+                        or [float(value) for value in injection_weights]
+                        != expected_injection_weights
+                    ):
+                        raise ValueError("reserved injection weights are invalid")
+                    if not any(float(value) > 0 for value in injection_weights):
+                        raise ValueError("a reserved no-op has no injectable loss")
+                    if any(
+                        float(value) != 0.0 for value in self.loss_weights[position]
+                    ):
+                        raise ValueError("a reserved no-op has active loss weights")
+                elif injection_weights:
+                    raise ValueError(
+                        "ordinary occurrences cannot carry injection loss weights"
+                    )
+        declared_slots = self.hyperparameters.get("reserved_noop_slots")
+        if declared_slots is None:
+            if reserved_positions:
+                raise ValueError("reserved no-op rows require a declared slot count")
+        else:
+            if isinstance(declared_slots, bool) or not isinstance(declared_slots, int):
+                raise ValueError("reserved no-op slot count is malformed")
+            if not 0 <= declared_slots < batch_size:
+                raise ValueError("reserved no-op slot count is outside the batch")
+            expected_positions = set(range(batch_size - declared_slots, batch_size))
+            if reserved_positions != expected_positions:
+                raise ValueError(
+                    "reserved no-op rows do not match the declared trailing slots"
+                )
+            if declared_slots and denominator <= 0:
+                raise ValueError(
+                    "reserved no-op slots require a positive active loss denominator"
+                )
         if abs(denominator - self.original_loss_denominator) > 1e-5:
             raise ValueError("original loss denominator does not match token weights")
         if self.recorded_loss is not None and not math.isfinite(self.recorded_loss):
@@ -273,6 +336,8 @@ _OCCURRENCE_SCHEMA = pa.schema(
         ("completion_token_mask", pa.list_(pa.bool_())),
         ("left_truncated_tokens", pa.int32()),
         ("right_truncated_tokens", pa.int32()),
+        ("reserved_noop", pa.bool_()),
+        ("injection_loss_weights", pa.list_(pa.float64())),
     ]
 )
 
@@ -549,15 +614,13 @@ class LedgerReader:
                 for spans in event.occurrence_spans:
                     for span in spans:
                         expected_occurrence_digest.update(
-                            str(span["occurrence_id"]).encode("ascii") + b"\n"
+                            _canonical_bytes(dict(span)) + b"\n"
                         )
             occurrence_table_count = 0
             actual_occurrence_digest = hashlib.sha256()
             for row in self.iter_occurrences():
                 occurrence_table_count += 1
-                actual_occurrence_digest.update(
-                    str(row["occurrence_id"]).encode("ascii") + b"\n"
-                )
+                actual_occurrence_digest.update(_canonical_bytes(dict(row)) + b"\n")
             if actual_batches != counts.get("batches"):
                 issues.append("batch count differs from ledger manifest")
             if actual_occurrences != counts.get("occurrences"):
@@ -566,7 +629,7 @@ class LedgerReader:
                 issues.append("occurrence table count differs from batch spans")
             if actual_occurrence_digest.digest() != expected_occurrence_digest.digest():
                 issues.append(
-                    "occurrence table order or identity differs from batch spans"
+                    "occurrence table order or content differs from batch spans"
                 )
         except Exception as error:
             issues.append(str(error))
